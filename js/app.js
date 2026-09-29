@@ -70,6 +70,12 @@ async function reloadData() {
   if (legacy.length) await Promise.all(legacy.map(t => DB.put('transactions', t)));
   BUDGETS = await DB.getMeta('budgets', structuredClone(BUDGETS_DEFAULT));
   PAYMENTS = await DB.getMeta('payments', structuredClone(PAYMENTS_DEFAULT));
+  const missingPayments = PAYMENTS_DEFAULT.filter(p => !PAYMENTS.includes(p));
+  if (missingPayments.length) {
+    const others = PAYMENTS.filter(p => !PAYMENTS_DEFAULT.includes(p));
+    PAYMENTS = [...PAYMENTS_DEFAULT, ...others];
+    await DB.setMeta('payments', PAYMENTS);
+  }
   PROFILE = await DB.getMeta('profile', structuredClone(PROFILE_DEFAULT));
   SETTINGS = await DB.getMeta('settings', structuredClone(SETTINGS_DEFAULT));
   S.theme = SETTINGS.theme || 'system';

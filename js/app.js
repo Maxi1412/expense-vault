@@ -154,6 +154,50 @@ const back = t => `<div class="row" style="margin-bottom:8px"><button class="ico
 const empty = (e, t, m, b, a) => `<div class="empty"><div class="e">${e}</div><h3>${esc(t)}</h3><p>${esc(m)}</p>${b ? `<button class="btn" style="max-width:260px" onclick="${a}">${esc(b)}</button>` : ''}</div>`;
 const txRow = t => `<button class="item" onclick="txDetail('${t.id}')">${txCatIco(t)}<div class="grow"><b>${esc(t.merchant)}</b><div class="mut">${t.type === 'income' ? 'Income · ' : ''}${esc(t.category)} · ${fd(t.date)} ${t.receiptId ? '· 📎' : ''}</div></div><span class="amt ${t.type === 'income' ? 'income-amt' : ''}">${t.type === 'income' ? '+' : ''}${eur(t.amount)}</span></button>`;
 
+function detailList(title, list, opts = {}) {
+  const sorted = list.slice().sort((a,b) => b.date.localeCompare(a.date) || String(b.time || '').localeCompare(String(a.time || '')));
+  const inc = incomeSum(sorted), out = expenseSum(sorted), singleDay = sorted.length && sorted.every(t => t.date === sorted[0].date);
+  let last = '';
+  const rows = sorted.map(t => {
+    const dateHead = !singleDay && t.date !== last ? `<div class="detail-date">${fdl(t.date)}</div>` : '';
+    last = t.date;
+    return dateHead + `<button class="detail-item" onclick="txDetail('${t.id}')">${txCatIco(t)}<div class="grow"><b>${esc(t.merchant)}</b><div class="mut">${esc(t.category)}${t.subcategory ? ' · ' + esc(t.subcategory) : ''}${t.time ? ' · ' + esc(t.time) : ''}${t.receiptId ? ' · 📎' : ''}</div></div><span class="amt ${t.type === 'income' ? 'income-amt' : ''}">${t.type === 'income' ? '+' : ''}${eur(t.amount)}</span></button>`;
+  }).join('');
+  const summary = opts.type === 'income'
+    ? `<div><span class="mut">Income</span><div class="detail-total income-amt">${eur(inc)}</div></div>`
+    : opts.type === 'expense'
+      ? `<div><span class="mut">Spent</span><div class="detail-total">${eur(out)}</div></div>`
+      : `<div><span class="mut">Balance</span><div class="detail-total ${inc-out >= 0 ? 'income-amt' : 'up'}">${eur(inc-out)}</div></div><div class="detail-mini"><span>In ${eur(inc)}</span><span>Out ${eur(out)}</span></div>`;
+  sheet(`<div class="detail-head"><div><h2 style="margin:0">${esc(title)}</h2>${opts.subtitle ? `<div class="mut">${esc(opts.subtitle)}</div>` : ''}</div><button class="icon-btn" aria-label="Close" onclick="closeSheet()">×</button></div>
+    <div class="card detail-summary"><div>${summary}</div><div class="mut">${sorted.length} transaction${sorted.length===1?'':'s'}</div></div>
+    <div class="card detail-list">${rows || empty('🧾','Nothing recorded','There are no matching transactions yet.')}</div>`, true);
+}
+
+function drillPeriod(type, from, to, title) {
+  let l = between(from, to);
+  if (type === 'expense') l = expenses(l);
+  if (type === 'income') l = incomes(l);
+  detailList(title, l, { type, subtitle: from === to ? fdl(from) : `${fd(from)} – ${fd(to)}` });
+}
+function drillMonth(type, key, title) {
+  const l = type === 'income' ? incomes(inMonth(key)) : type === 'expense' ? expenses(inMonth(key)) : inMonth(key);
+  detailList(title || monthName(key), l, { type, subtitle: monthName(key) });
+}
+function drillCategory(name, key = TODAY.slice(0,7)) {
+  const l = expenses(inMonth(key)).filter(t => t.category === name);
+  detailList(name, l, { type:'expense', subtitle: monthName(key) });
+}
+function drillMerchant(name, from, to) {
+  const l = expenses(between(from,to)).filter(t => t.merchant === name);
+  detailList(name, l, { type:'expense', subtitle: from === to ? fdl(from) : `${fd(from)} – ${fd(to)}` });
+}
+function categoryBreakdown(key = TODAY.slice(0,7)) {
+  const l = expenses(inMonth(key));
+  const rows = byCat(l).map(([n,v]) => `<button class="detail-item" onclick="drillCategory('${String(n).replace(/'/g,"\\'")}','${key}')"><div class="ico" style="background:${cat(n).color}22">${cat(n).icon}</div><div class="grow"><b>${esc(n)}</b><div class="mut">${l.filter(t=>t.category===n).length} transaction${l.filter(t=>t.category===n).length===1?'':'s'}</div></div><span class="amt">${eur(v)}</span></button>`).join('');
+  sheet(`<div class="detail-head"><div><h2 style="margin:0">Spending categories</h2><div class="mut">${monthName(key)}</div></div><button class="icon-btn" aria-label="Close" onclick="closeSheet()">×</button></div>
+    <div class="card detail-list">${rows || empty('🏷️','No category spending yet','Expenses will appear here once you add them.')}</div>`, true);
+}
+
 /* ---------- home ---------- */
 function home() {
   const k = monthKey(S.mo), cur = S.mo === 0, l = inMonth(k), out = expenseSum(l), inc = incomeSum(l), balance = inc - out, budget = Number(SETTINGS.monthlyBudget || 0), rem = budget - out;
@@ -166,10 +210,10 @@ function home() {
   <div class="card hero"><div class="row sp"><span>${cur ? 'This month · balance' : 'Monthly balance'}</span><button class="icon-btn hero-search" aria-label="Search" onclick="gsearch()">⌕</button></div><div class="big">${eur(balance)}</div>
   <div class="row sp" style="margin-top:10px"><span>Income <b>${eur(inc)}</b></span><span>Expenses <b>${eur(out)}</b></span></div>
   ${budget > 0 ? `<div class="bar" style="margin:12px 0 8px"><i style="width:${pct}%"></i></div><div class="row sp"><span>${rem >= 0 ? eur(rem) + ' budget remaining' : eur(-rem) + ' over budget'}</span><span>of ${eur(budget)}</span></div>` : '<div style="margin-top:10px">No monthly budget set</div>'}</div>
-  <div class="grid2"><div class="card stat"><span class="mut">Today spent</span><b>${eur(expenseSum(TX.filter(t => t.date === TODAY)))}</b></div><div class="card stat"><span class="mut">This week spent</span><b>${eur(expenseSum(wk))}</b></div>
-  <div class="card stat"><span class="mut">Income this month</span><b class="income-amt">${eur(inc)}</b></div><div class="card stat"><span class="mut">vs last month spending</span><b class="${ch > 0 ? 'up' : 'down'}">${ps ? `${ch > 0 ? '↑' : '↓'} ${Math.abs(ch).toFixed(1)}%` : '—'}</b></div></div>
+  <div class="grid2"><button class="card stat tap-card" onclick="drillPeriod('expense',TODAY,TODAY,'Today’s expenses')"><span class="mut">Today spent</span><b>${eur(expenseSum(TX.filter(t => t.date === TODAY)))}</b><span class="tap-more">View details ›</span></button><button class="card stat tap-card" onclick="drillPeriod('expense',add(TODAY,-6),TODAY,'This week’s expenses')"><span class="mut">This week spent</span><b>${eur(expenseSum(wk))}</b><span class="tap-more">View details ›</span></button>
+  <button class="card stat tap-card" onclick="drillMonth('income','${k}','Income · ${monthName(k)}')"><span class="mut">Income this month</span><b class="income-amt">${eur(inc)}</b><span class="tap-more">View details ›</span></button><button class="card stat tap-card" onclick="drillMonth('expense','${k}','Expenses · ${monthName(k)}')"><span class="mut">Monthly spending</span><b>${eur(out)}</b><span class="tap-more">View details ›</span></button></div>
   <div class="card" style="margin-top:14px"><h2>Daily spending</h2>${bars(dv, dv.map((_, i) => (i + 1) % 5 === 0 ? i + 1 : ''))}</div>
-  <div class="card"><h2>Where it went</h2>${expenses(l).length ? donutCard(expenses(l)) : '<p class="mut">No spending this month.</p>'}</div>
+  <div class="card"><div class="row sp"><h2>Where it went</h2><button class="mut detail-link" onclick="categoryBreakdown('${k}')">View categories ›</button></div>${expenses(l).length ? donutCard(expenses(l)) : '<p class="mut">No spending this month.</p>'}</div>
   <div class="card"><div class="row sp"><h2>Recent activity</h2><button class="mut" onclick="go('tx')">See all</button></div>${TX.slice().sort((a, b) => b.date.localeCompare(a.date) || b.created.localeCompare(a.created)).slice(0, 6).map(txRow).join('') || empty('🧾', 'No activity yet', 'Add your first income or expense.', 'Add transaction', 'addChoose()')}</div>`;
 }
 
@@ -507,13 +551,13 @@ function analytics() {
   const merch = Object.entries(expenses(l).reduce((m, t) => (m[t.merchant] = (m[t.merchant] || 0) + t.amount, m), {})).sort((a, b) => b[1] - a[1]).slice(0, 5);
   const mk = [-3, -2, -1, 0].map(monthKey);
   return `<h1>Analytics</h1><div class="chips">${['day', 'week', 'month', 'year'].map(k => `<button class="pill ${S.per === k ? 'on' : ''}" onclick="S.per='${k}';render()">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div>
-  <div class="grid2"><div class="card stat"><span class="mut">Income</span><b class="income-amt">${eur(inc)}</b></div><div class="card stat"><span class="mut">Expenses</span><b>${eur(out)}</b></div><div class="card stat"><span class="mut">Net balance</span><b class="${net >= 0 ? 'income-amt' : 'up'}">${eur(net)}</b></div><div class="card stat"><span class="mut">Transactions</span><b>${l.length}</b></div></div>
+  <div class="grid2"><button class="card stat tap-card" onclick="drillPeriod('income','${from}',TODAY,'Income · ${S.per}')"><span class="mut">Income</span><b class="income-amt">${eur(inc)}</b><span class="tap-more">View details ›</span></button><button class="card stat tap-card" onclick="drillPeriod('expense','${from}',TODAY,'Expenses · ${S.per}')"><span class="mut">Expenses</span><b>${eur(out)}</b><span class="tap-more">View details ›</span></button><button class="card stat tap-card" onclick="drillPeriod('all','${from}',TODAY,'Activity · ${S.per}')"><span class="mut">Net balance</span><b class="${net >= 0 ? 'income-amt' : 'up'}">${eur(net)}</b><span class="tap-more">View activity ›</span></button><button class="card stat tap-card" onclick="drillPeriod('all','${from}',TODAY,'Transactions · ${S.per}')"><span class="mut">Transactions</span><b>${l.length}</b><span class="tap-more">View list ›</span></button></div>
   <div class="card" style="margin-top:14px"><span class="mut">Spending · ${fd(from)} – ${fd(TODAY)}</span><div class="big">${eur(out)}</div><span class="${ch > 0 ? 'up' : 'down'}">${prev ? `${ch > 0 ? '↑' : '↓'} ${Math.abs(ch).toFixed(1)}% vs previous ${S.per}` : 'No previous period comparison yet'}</span></div>
-  <div class="grid2"><div class="card stat"><span class="mut">Avg spent/day</span><b>${eur(out / days)}</b></div><div class="card stat"><span class="mut">Largest expense</span><b>${big ? eur(big.amount) : '—'}</b></div></div>
+  <div class="grid2"><div class="card stat"><span class="mut">Avg spent/day</span><b>${eur(out / days)}</b></div><button class="card stat tap-card" ${big ? `onclick="txDetail('${big.id}')"` : 'disabled'}><span class="mut">Largest expense</span><b>${big ? eur(big.amount) : '—'}</b>${big ? '<span class="tap-more">View transaction ›</span>' : ''}</button></div>
   <div class="card" style="margin-top:14px"><h2>Spending over time</h2>${bars(vals, labs)}</div>
   <div class="card"><h2>Income over time</h2>${bars(incVals, labs, 'var(--ok)')}</div>
   <div class="card"><h2>Where does my money go?</h2>${expenses(l).length ? donutCard(expenses(l)) : '<p class="mut">No expense data.</p>'}</div>
-  <div class="card"><h2>Top merchants</h2>${merch.map(([n, v]) => `<div style="margin:10px 0"><div class="row sp"><span>${esc(n)}</span><b>${eur(v)}</b></div><div class="bar"><i style="width:${v / merch[0][1] * 100}%;background:var(--acc)"></i></div></div>`).join('') || '<p class="mut">No expense data.</p>'}</div>
+  <div class="card"><h2>Top merchants</h2>${merch.map(([n, v]) => `<button class="merchant-row" onclick="drillMerchant('${String(n).replace(/'/g,"\\'")}','${from}',TODAY)"><div class="row sp"><span>${esc(n)}</span><b>${eur(v)}</b></div><div class="bar"><i style="width:${v / merch[0][1] * 100}%;background:var(--acc)"></i></div><span class="tap-more">View purchases ›</span></button>`).join('') || '<p class="mut">No expense data.</p>'}</div>
   <div class="card"><h2>Recent monthly income</h2>${bars(mk.map(k => incomeSum(inMonth(k))), mk.map(k => monthName(k).slice(0, 3)), 'var(--ok)')}</div>`;
 }
 
@@ -537,7 +581,7 @@ function budgetForm(i) {
 }
 async function saveBudget(i) { const v = { cat: $('#bc').value, limit: +$('#bl').value }; if (!(v.limit > 0)) return; i >= 0 ? BUDGETS[i] = v : BUDGETS.push(v); await saveMeta('budgets', BUDGETS); closeSheet(); render(); }
 async function removeBudget(i) { BUDGETS.splice(i, 1); await saveMeta('budgets', BUDGETS); closeSheet(); render(); }
-function cats() { return back('Categories') + `<div class="card">${CATS.map((c, i) => `<button class="item" onclick="catForm(${i})">${catIco(c.name)}<b class="grow">${esc(c.name)}</b><span class="mut">${c.custom ? 'Custom' : ''}</span>›</button>`).join('')}</div><button class="btn" onclick="catForm(-1)">New category</button>`; }
+function cats() { return back('Categories') + `<div class="card">${CATS.map((c, i) => { const m=expenses(inMonth(TODAY.slice(0,7))).filter(t=>t.category===c.name), total=sum(m); return `<div class="category-manage-row">${catIco(c.name)}<button class="grow category-view" onclick="drillCategory('${String(c.name).replace(/'/g,"\\'")}')"><b>${esc(c.name)}</b><span class="mut">${m.length} this month · ${eur(total)}</span></button><button class="icon-btn category-edit" aria-label="Edit ${esc(c.name)}" onclick="catForm(${i})">✎</button></div>`; }).join('')}</div><button class="btn" onclick="catForm(-1)">New category</button>`; }
 function catForm(i) {
   const c = CATS[i] || { name: '', icon: '⭐', color: '#5b6ee1', custom: true }; window._ic = c.icon; window._cc = c.color;
   sheet(`<h2>${i < 0 ? 'New category' : 'Category'}</h2><label for="cn">Name</label><input id="cn" value="${esc(c.name)}"><label>Icon</label><div class="sw">${['⭐', '🍕', '🎮', '🌿', '🏋️', '☕', '🔧', '🎓', '💼', '🚲', '🎵', '🧾'].map(x => `<button aria-label="Icon ${x}" class="${x === c.icon ? 'on' : ''}" onclick="_ic='${x}';this.parentNode.querySelectorAll('button').forEach(b=>b.classList.remove('on'));this.classList.add('on')">${x}</button>`).join('')}</div>

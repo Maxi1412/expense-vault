@@ -24,6 +24,7 @@ const S = {
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const jsarg = s => esc(String(s ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r/g, '\\r').replace(/\n/g, '\\n'));
 
 function localDateISO(d) {
   const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0');
@@ -199,7 +200,7 @@ function drillMerchant(name, from, to) {
 }
 function categoryBreakdown(key = TODAY.slice(0,7)) {
   const l = expenses(inMonth(key));
-  const rows = byCat(l).map(([n,v]) => `<button class="detail-item" onclick="drillCategory('${String(n).replace(/'/g,"\\'")}','${key}')"><div class="ico" style="background:${cat(n).color}22">${cat(n).icon}</div><div class="grow"><b>${esc(n)}</b><div class="mut">${l.filter(t=>t.category===n).length} transaction${l.filter(t=>t.category===n).length===1?'':'s'}</div></div><span class="amt">${eur(v)}</span></button>`).join('');
+  const rows = byCat(l).map(([n,v]) => `<button class="detail-item" onclick="drillCategory('${jsarg(n)}','${key}')"><div class="ico" style="background:${cat(n).color}22">${cat(n).icon}</div><div class="grow"><b>${esc(n)}</b><div class="mut">${l.filter(t=>t.category===n).length} transaction${l.filter(t=>t.category===n).length===1?'':'s'}</div></div><span class="amt">${eur(v)}</span></button>`).join('');
   sheet(`<div class="detail-head"><div><h2 style="margin:0">Spending categories</h2><div class="mut">${monthName(key)}</div></div></div>
     <div class="card detail-list">${rows || empty('🏷️','No category spending yet','Expenses will appear here once you add them.')}</div>`, true);
 }
@@ -207,7 +208,7 @@ function categoryBreakdown(key = TODAY.slice(0,7)) {
 function monthOverview(key) {
   const l = inMonth(key), inc = incomeSum(l), out = expenseSum(l), bal = inc - out;
   const cats = byCat(expenses(l)).slice(0, 6);
-  const catRows = cats.map(([n,v]) => `<button class="detail-item" onclick="drillCategory('${String(n).replace(/'/g,"\\'")}','${key}')"><div class="ico" style="background:${cat(n).color}22">${cat(n).icon}</div><div class="grow"><b>${esc(n)}</b><div class="mut">${expenses(l).filter(t=>t.category===n).length} transaction${expenses(l).filter(t=>t.category===n).length===1?'':'s'}</div></div><span class="amt">${eur(v)}</span></button>`).join('');
+  const catRows = cats.map(([n,v]) => `<button class="detail-item" onclick="drillCategory('${jsarg(n)}','${key}')"><div class="ico" style="background:${cat(n).color}22">${cat(n).icon}</div><div class="grow"><b>${esc(n)}</b><div class="mut">${expenses(l).filter(t=>t.category===n).length} transaction${expenses(l).filter(t=>t.category===n).length===1?'':'s'}</div></div><span class="amt">${eur(v)}</span></button>`).join('');
   const recent = l.slice().sort((a,b)=>b.date.localeCompare(a.date)||String(b.time||'').localeCompare(String(a.time||''))).slice(0,8);
   sheet(`<div class="detail-head"><div><h2 style="margin:0">${monthName(key)}</h2><div class="mut">Monthly breakdown</div></div></div>
     <div class="month-overview-grid">
@@ -604,7 +605,7 @@ function gres(q) {
   const rng = q.replace(/[€\s]/g, '').match(/^(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)$/);
   const l = TX.filter(t => rng ? t.amount >= +rng[1] && t.amount <= +rng[2] : `${t.merchant} ${t.category} ${t.notes || ''} ${monthName(t.date.slice(0, 7))}`.toLowerCase().includes(q)).sort((a, b) => b.date.localeCompare(a.date));
   const cs = [...CATS, ...INCOME_CATS].filter(c => c.name.toLowerCase().includes(q));
-  r.innerHTML = `${cs.length ? `<h2 style="margin-top:14px">Categories</h2>${cs.map(c => `<button class="item" onclick="closeSheet();S.q='${esc(c.name)}';go('tx')"><div class="ico" style="background:${c.color}22">${c.icon}</div><b>${esc(c.name)}</b></button>`).join('')}` : ''}
+  r.innerHTML = `${cs.length ? `<h2 style="margin-top:14px">Categories</h2>${cs.map(c => `<button class="item" onclick="closeSheet();S.q='${jsarg(c.name)}';go('tx')"><div class="ico" style="background:${c.color}22">${c.icon}</div><b>${esc(c.name)}</b></button>`).join('')}` : ''}
   <h2 style="margin-top:14px">Activity (${l.length}) · In ${eur(incomeSum(l))} · Out ${eur(expenseSum(l))}</h2>${l.slice(0, 30).map(txRow).join('') || empty('🔎', 'No results', 'Try another search.')}`;
 }
 
@@ -624,7 +625,7 @@ function analytics() {
   <div class="card" style="margin-top:14px"><h2>Spending over time</h2>${bars(vals, labs)}</div>
   <div class="card"><h2>Income over time</h2>${bars(incVals, labs, 'var(--ok)')}</div>
   <div class="card"><h2>Where does my money go?</h2>${expenses(l).length ? donutCard(expenses(l)) : '<p class="mut">No expense data.</p>'}</div>
-  <div class="card"><h2>Top merchants</h2>${merch.map(([n, v]) => `<button class="merchant-row" onclick="drillMerchant('${String(n).replace(/'/g,"\\'")}','${from}',TODAY)"><div class="row sp"><span>${esc(n)}</span><b>${eur(v)}</b></div><div class="bar"><i style="width:${v / merch[0][1] * 100}%;background:var(--acc)"></i></div><span class="tap-more">View purchases ›</span></button>`).join('') || '<p class="mut">No expense data.</p>'}</div>
+  <div class="card"><h2>Top merchants</h2>${merch.map(([n, v]) => `<button class="merchant-row" onclick="drillMerchant('${jsarg(n)}','${from}',TODAY)"><div class="row sp"><span>${esc(n)}</span><b>${eur(v)}</b></div><div class="bar"><i style="width:${v / merch[0][1] * 100}%;background:var(--acc)"></i></div><span class="tap-more">View purchases ›</span></button>`).join('') || '<p class="mut">No expense data.</p>'}</div>
   <div class="card"><h2>Recent monthly income</h2>${bars(mk.map(k => incomeSum(inMonth(k))), mk.map(k => monthName(k).slice(0, 3)), 'var(--ok)')}</div>`;
 }
 
@@ -648,7 +649,7 @@ function budgetForm(i) {
 }
 async function saveBudget(i) { const v = { cat: $('#bc').value, limit: +$('#bl').value }; if (!(v.limit > 0)) return; i >= 0 ? BUDGETS[i] = v : BUDGETS.push(v); await saveMeta('budgets', BUDGETS); closeSheet(); render(); }
 async function removeBudget(i) { BUDGETS.splice(i, 1); await saveMeta('budgets', BUDGETS); closeSheet(); render(); }
-function cats() { return back('Categories') + `<div class="card">${CATS.map((c, i) => { const m=expenses(inMonth(TODAY.slice(0,7))).filter(t=>t.category===c.name), total=sum(m); return `<div class="category-manage-row">${catIco(c.name)}<button class="grow category-view" onclick="drillCategory('${String(c.name).replace(/'/g,"\\'")}')"><b>${esc(c.name)}</b><span class="mut">${m.length} this month · ${eur(total)}</span></button><button class="icon-btn category-edit" aria-label="Edit ${esc(c.name)}" onclick="catForm(${i})">✎</button></div>`; }).join('')}</div><button class="btn" onclick="catForm(-1)">New category</button>`; }
+function cats() { return back('Categories') + `<div class="card">${CATS.map((c, i) => { const m=expenses(inMonth(TODAY.slice(0,7))).filter(t=>t.category===c.name), total=sum(m); return `<div class="category-manage-row">${catIco(c.name)}<button class="grow category-view" onclick="drillCategory('${jsarg(c.name)}')"><b>${esc(c.name)}</b><span class="mut">${m.length} this month · ${eur(total)}</span></button><button class="icon-btn category-edit" aria-label="Edit ${esc(c.name)}" onclick="catForm(${i})">✎</button></div>`; }).join('')}</div><button class="btn" onclick="catForm(-1)">New category</button>`; }
 function catForm(i) {
   const c = CATS[i] || { name: '', icon: '⭐', color: '#5b6ee1', custom: true }; window._ic = c.icon; window._cc = c.color;
   sheet(`<h2>${i < 0 ? 'New category' : 'Category'}</h2><label for="cn">Name</label><input id="cn" value="${esc(c.name)}"><label>Icon</label><div class="sw">${['⭐', '🍕', '🎮', '🌿', '🏋️', '☕', '🔧', '🎓', '💼', '🚲', '🎵', '🧾'].map(x => `<button aria-label="Icon ${x}" class="${x === c.icon ? 'on' : ''}" onclick="_ic='${x}';this.parentNode.querySelectorAll('button').forEach(b=>b.classList.remove('on'));this.classList.add('on')">${x}</button>`).join('')}</div>

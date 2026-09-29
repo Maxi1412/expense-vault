@@ -63,3 +63,23 @@ svg text{fill:var(--mut);font-size:9px}
 input[type=color]{padding:5px;height:50px}.rgrid button{min-width:0;overflow:hidden}.rgrid b,.rgrid .mut{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.donut-wrap{align-items:center}
 @media(max-width:380px){.big{font-size:30px}.donut-wrap{align-items:flex-start;flex-direction:column}.donut-wrap>div:first-child{align-self:center}.btns{flex-wrap:wrap}.btns .btn{flex:1 1 130px}.rgrid{grid-template-columns:1fr}}
 .income-amt{color:var(--ok)!important}
+/* Drill-down interaction */
+.tap-card{display:block;width:100%;text-align:left;color:inherit}
+.tap-card:active,.merchant-row:active,.detail-item:active,.category-view:active{transform:scale(.99)}
+.tap-more{display:block;color:var(--acc);font-size:12px;font-weight:650;margin-top:6px}
+.detail-link{min-height:40px;padding:0 4px}
+.detail-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.detail-summary{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
+.detail-total{font-size:30px;font-weight:750;margin-top:2px}
+.detail-mini{display:flex;gap:12px;font-size:13px;margin-top:6px;color:var(--mut)}
+.detail-list{padding-top:8px}
+.detail-date{font-size:13px;color:var(--mut);font-weight:700;padding:10px 2px 4px}
+.detail-item{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);width:100%;text-align:left;min-height:64px;color:inherit}
+.detail-item:last-child{border-bottom:0}
+.merchant-row{display:block;width:100%;text-align:left;color:inherit;padding:10px 0;border-bottom:1px solid var(--line)}
+.merchant-row:last-child{border-bottom:0}
+.category-manage-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
+.category-manage-row:last-child{border-bottom:0}
+.category-view{display:flex;flex-direction:column;align-items:flex-start;text-align:left;padding:8px 0;min-width:0;color:inherit}
+.category-edit{box-shadow:none;background:var(--acc2);color:var(--acc);flex:none}
+@media(max-width:380px){.detail-summary{align-items:flex-start;flex-direction:column}.detail-total{font-size:26px}}

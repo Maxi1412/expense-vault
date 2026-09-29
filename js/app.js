@@ -216,7 +216,7 @@ function txDetail(id) {
   const t = store.get(id); if (!t) return;
   const url = receiptUrl(t.receiptId), isIncome = t.type === 'income';
   sheet(`<div class="row">${txCatIco(t)}<div class="grow"><h2 style="margin:0">${esc(t.merchant)}</h2><span class="mut">${isIncome ? 'Income · ' : ''}${esc(t.category)}${t.subcategory ? ' · ' + esc(t.subcategory) : ''}</span></div></div><div class="big ${isIncome ? 'income-amt' : ''}" style="margin:12px 0">${isIncome ? '+' : ''}${eur(t.amount)}</div>
-  <div class="card">${[['Type', isIncome ? 'Income' : 'Expense'], ['Date', fdl(t.date) + ' · ' + (t.time || '')], [isIncome ? 'Received via' : 'Payment', t.payment], ['Notes', t.notes || '—'], ['Created', fd(t.created.slice(0, 10))], ['Last edited', fd(t.modified.slice(0, 10))]].map(([a, b]) => `<div class="row sp detail-row"><span class="mut">${a}</span><span>${esc(b)}</span></div>`).join('')}</div>
+  <div class="card">${[['Type', isIncome ? 'Income' : 'Expense'], ['Date', fdl(t.date) + ' · ' + (t.time || '')], [isIncome ? 'Received via' : 'Payment', t.payment], ...(isIncome || !(Number(t.taxTotal || 0) > 0) ? [] : [['Tax / VAT', eur(t.taxTotal)], ['Subtotal before tax', eur(t.subtotal ?? Math.max(0, Number(t.amount || 0) - Number(t.taxTotal || 0)))], ['Tax rate', (t.taxRates || []).length ? t.taxRates.join(', ') + '%' : '—']]), ['Notes', t.notes || '—'], ['Created', fd(t.created.slice(0, 10))], ['Last edited', fd(t.modified.slice(0, 10))]].map(([a, b]) => `<div class="row sp detail-row"><span class="mut">${a}</span><span>${esc(b)}</span></div>`).join('')}</div>
   ${url ? `<img class="rcp" alt="Attached document" src="${url}" style="max-height:220px;object-fit:contain;margin-bottom:10px">` : ''}
   <div class="btns" style="flex-wrap:wrap">${url ? `<button class="btn sec" onclick="rcpView('${id}')">View attachment</button>` : ''}<button class="btn sec" onclick="txForm('${id}')">Edit</button><button class="btn del" onclick="confirmDel('${id}')">Delete</button></div>`, true);
 }
@@ -327,8 +327,56 @@ function parseReceipt(text) {
   else if (/(cash|efectivo|barzahlung|bargeld)/i.test(raw)) payment = 'Cash';
   const merchant = detectMerchant(lines);
   const category = categorizeReceipt(merchant, low);
-  return { merchant, amount: Number.isFinite(amount) ? amount : '', date, category, payment, notes: '' };
+  const tax = parseTaxInfo(raw, Number.isFinite(amount) ? amount : null);
+  return { merchant, amount: Number.isFinite(amount) ? amount : '', date, category, payment, notes: '', ...tax };
 }
+
+function parseTaxInfo(raw, totalAmount) {
+  const lines = String(raw || '').replace(/\r/g, '').split('\n').map(x => x.trim()).filter(Boolean);
+  const money = s => [...String(s).matchAll(/(?:€|eur\s*)?(-?\d{1,6}(?:[.,]\d{2}))(?:\s*€|\s*eur)?/ig)]
+    .map(m => parseMoney(m[1])).filter(v => Number.isFinite(v) && v >= 0);
+  const rateRe = /(\d{1,2}(?:[.,]\d{1,2})?)\s*%/g;
+  const explicitTax = /(total\s*(?:iva|vat|tax)|(?:iva|vat|tax)\s*total|cuota\s*(?:iva|tributaria)?|vat\s*amount|tax\s*amount|mwst\.?\s*(?:betrag)?|impuesto\s*total)/i;
+  const taxContext = /(iva|vat|tax|mwst|impuesto|base\s*imponible|tipo|cuota)/i;
+  let taxTotal = null;
+  const rates = [];
+  const lineTaxAmounts = [];
+
+  for (const line of lines) {
+    const rateMatches = [...line.matchAll(rateRe)].map(m => parseMoney(m[1])).filter(v => v > 0 && v <= 50);
+    rateMatches.forEach(r => { if (!rates.some(x => Math.abs(x - r) < 0.001)) rates.push(r); });
+
+    if (explicitTax.test(line)) {
+      const vals = money(line.replace(rateRe, ''));
+      const plausible = vals.filter(v => !Number.isFinite(totalAmount) || v <= totalAmount);
+      if (plausible.length) taxTotal = plausible[plausible.length - 1];
+      continue;
+    }
+
+    if (taxContext.test(line) && rateMatches.length) {
+      const vals = money(line.replace(rateRe, ''));
+      if (vals.length >= 2) {
+        const candidate = vals[vals.length - 1];
+        if (candidate >= 0 && (!Number.isFinite(totalAmount) || candidate <= totalAmount)) lineTaxAmounts.push(candidate);
+      }
+    }
+  }
+
+  if (!Number.isFinite(taxTotal) && lineTaxAmounts.length) {
+    const s = lineTaxAmounts.reduce((a, b) => a + b, 0);
+    if (!Number.isFinite(totalAmount) || s <= totalAmount) taxTotal = Math.round(s * 100) / 100;
+  }
+
+  const included = /(iva\s*(?:incluido|incl\.?|included)|vat\s*included|tax\s*included|inkl\.?\s*(?:mwst|ust)|mwst\s*inkl)/i.test(raw);
+  if (!Number.isFinite(taxTotal) && included && rates.length === 1 && Number.isFinite(totalAmount) && totalAmount > 0) {
+    taxTotal = Math.round((totalAmount - totalAmount / (1 + rates[0] / 100)) * 100) / 100;
+  }
+
+  if (!Number.isFinite(taxTotal) || taxTotal < 0 || (Number.isFinite(totalAmount) && taxTotal > totalAmount)) taxTotal = 0;
+  const subtotal = Number.isFinite(totalAmount) ? Math.round(Math.max(0, totalAmount - taxTotal) * 100) / 100 : 0;
+  return { taxTotal, taxRates: rates, subtotal };
+}
+
 function parseMoney(s) {
   s = String(s).replace(/\s/g, '');
   if (s.includes(',') && s.includes('.')) s = s.lastIndexOf(',') > s.lastIndexOf('.') ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
@@ -367,6 +415,7 @@ function txForm(id, d) {
   sheet(`<h2>${id ? 'Edit expense' : d?.scanned ? 'Review & Save' : 'Manual expense'}</h2>${d?.scanned ? '<div class="tag ok scan-tag">Detected locally from receipt — please check every field</div>' : ''}
   ${d?.previewUrl ? `<img class="rcp receipt-mini" alt="Receipt being reviewed" src="${d.previewUrl}">` : existingUrl ? `<img class="rcp receipt-mini" alt="Attached receipt" src="${existingUrl}">` : ''}
   <label for="fa">Amount</label><input id="fa" class="amt-in" type="number" inputmode="decimal" step="0.01" placeholder="0.00" value="${t.amount ?? ''}">
+  <div class="grid2"><div><label for="ftax">Tax / VAT (optional)</label><input id="ftax" type="number" inputmode="decimal" step="0.01" min="0" value="${Number(t.taxTotal || 0) ? t.taxTotal : ''}" placeholder="Auto-detected"></div><div><label>Tax rate</label><input value="${(t.taxRates || []).length ? esc(t.taxRates.join(', ') + '%') : ''}" placeholder="Auto-detected" readonly></div></div>
   <label for="fm">Merchant / Payee</label><input id="fm" value="${esc(t.merchant || '')}" placeholder="e.g. Mercadona">
   <div class="grid2"><div><label for="fd">Date</label><input id="fd" type="date" value="${t.date || TODAY}"></div><div><label for="fpay">Payment</label><select id="fpay">${o(PAYMENTS, t.payment)}</select></div></div>
   <label for="fcat">Category</label><select id="fcat">${o(CATS.map(c => c.name), t.category)}</select>
@@ -391,7 +440,9 @@ async function saveTx(id) {
       const row = { id: receiptId, blob: newBlob, name: newName || `receipt-${$('#fd').value || TODAY}.jpg`, type: newBlob.type || 'image/jpeg', size: newBlob.size, created: now };
       await DB.put('receipts', row); RECEIPTS.set(receiptId, row);
     }
-    const t = { id: id || uid('e'), type: 'expense', date: $('#fd').value || TODAY, time: old?.time || new Date().toTimeString().slice(0, 5), merchant: m, amount: a, category: $('#fcat').value, subcategory: $('#fsub').value.trim(), payment: $('#fpay').value, notes: $('#fn').value.trim(), receiptId, ocrText: draft?.ocrText || old?.ocrText || '', created: old?.created || now, modified: now };
+    const taxTotal = Math.max(0, parseFloat($('#ftax')?.value) || 0);
+    const taxRates = draft?.taxRates || old?.taxRates || [];
+    const t = { id: id || uid('e'), type: 'expense', date: $('#fd').value || TODAY, time: old?.time || new Date().toTimeString().slice(0, 5), merchant: m, amount: a, taxTotal, taxRates, subtotal: Math.round(Math.max(0, a - taxTotal) * 100) / 100, category: $('#fcat').value, subcategory: $('#fsub').value.trim(), payment: $('#fpay').value, notes: $('#fn').value.trim(), receiptId, ocrText: draft?.ocrText || old?.ocrText || '', created: old?.created || now, modified: now };
     await store.save(t);
     if (draft?.previewUrl) URL.revokeObjectURL(draft.previewUrl);
     const wasScan = !!draft?.scanned; draft = null;
@@ -592,13 +643,13 @@ async function resetLocalData() {
   await reloadData(); closeSheet(); go('home'); toast('Local data erased. Expense Vault is ready for a fresh start.');
 }
 function exportCsv() {
-  const rows = [['ID', 'Type', 'Date', 'Time', 'Merchant / Source', 'Amount', 'Category', 'Subcategory', 'Payment / Received via', 'Notes'], ...TX.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(t => [t.id, t.type || 'expense', t.date, t.time, t.merchant, t.amount, t.category, t.subcategory || '', t.payment, t.notes || ''])];
+  const rows = [['ID', 'Type', 'Date', 'Time', 'Merchant / Source', 'Amount', 'Subtotal before tax', 'Tax / VAT', 'Tax rate(s)', 'Category', 'Subcategory', 'Payment / Received via', 'Notes'], ...TX.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(t => [t.id, t.type || 'expense', t.date, t.time, t.merchant, t.amount, t.type === 'income' ? '' : (t.subtotal ?? ''), t.type === 'income' ? '' : (t.taxTotal || ''), t.type === 'income' ? '' : ((t.taxRates || []).join(', ')), t.category, t.subcategory || '', t.payment, t.notes || ''])];
   const csv = rows.map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n'); downloadBlob(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }), `expenses-${TODAY}.csv`);
 }
 async function exportExcel() {
   try {
     await loadScript('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js', 'XLSX');
-    const txRows = TX.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(t => ({ Type: t.type || 'expense', Date: t.date, Time: t.time, 'Merchant / Source': t.merchant, Amount: t.amount, Category: t.category, Subcategory: t.subcategory || '', 'Payment / Received via': t.payment, Notes: t.notes || '', Attachment: t.receiptId ? 'Yes' : 'No' }));
+    const txRows = TX.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(t => ({ Type: t.type || 'expense', Date: t.date, Time: t.time, 'Merchant / Source': t.merchant, Amount: t.amount, 'Subtotal before tax': t.type === 'income' ? '' : (t.subtotal ?? ''), 'Tax / VAT': t.type === 'income' ? '' : (t.taxTotal || ''), 'Tax rate(s)': t.type === 'income' ? '' : ((t.taxRates || []).join(', ')), Category: t.category, Subcategory: t.subcategory || '', 'Payment / Received via': t.payment, Notes: t.notes || '', Attachment: t.receiptId ? 'Yes' : 'No' }));
     const months = [...new Set(TX.map(t => t.date.slice(0,7)))].sort();
     const summary = months.map(m => ({ Month: monthName(m), Income: incomeSum(inMonth(m)), Expenses: expenseSum(inMonth(m)), Balance: incomeSum(inMonth(m)) - expenseSum(inMonth(m)), Transactions: inMonth(m).length }));
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(txRows), 'Transactions'); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), 'Monthly Summary'); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([...CATS.map(c => ({ Type: 'Expense', Category: c.name })), ...INCOME_CATS.map(c => ({ Type: 'Income', Category: c.name }))]), 'Categories');

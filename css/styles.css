@@ -83,3 +83,6 @@ input[type=color]{padding:5px;height:50px}.rgrid button{min-width:0;overflow:hid
 .category-view{display:flex;flex-direction:column;align-items:flex-start;text-align:left;padding:8px 0;min-width:0;color:inherit}
 .category-edit{box-shadow:none;background:var(--acc2);color:var(--acc);flex:none}
 @media(max-width:380px){.detail-summary{align-items:flex-start;flex-direction:column}.detail-total{font-size:26px}}
+
+.budget-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}
+.budget-actions .detail-link{color:var(--acc);font-weight:650;text-align:left}

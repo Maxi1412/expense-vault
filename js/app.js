@@ -153,7 +153,7 @@ function render() {
     ? `<button class="fab" aria-label="Add transaction" onclick="addChoose()">${i}</button>`
     : `<button class="${on === k ? 'on' : ''}" aria-current="${on === k ? 'page' : 'false'}" onclick="go('${k}')"><span aria-hidden="true">${i}</span>${l}</button>`).join('')}</nav>`;
 }
-function sheet(html, full = false) { const s = $('#sheet'); s.innerHTML = `<div class="pane ${full ? 'full' : ''}" role="dialog" aria-modal="true"><div class="grab"></div>${html}</div>`; s.classList.add('open'); }
+function sheet(html, full = false) { const s = $('#sheet'); s.innerHTML = `<div class="pane ${full ? 'full' : ''}" role="dialog" aria-modal="true"><button class="sheet-close" aria-label="Close" onclick="closeSheet()">×</button><div class="grab"></div>${html}</div>`; s.classList.add('open'); }
 function closeSheet() { const s = $('#sheet'); if (s) s.classList.remove('open'); }
 document.addEventListener('click', e => { if (e.target?.id === 'sheet') closeSheet(); });
 const back = t => `<div class="row" style="margin-bottom:8px"><button class="icon-btn" aria-label="Back" onclick="go('more')">←</button><h1 style="margin:0">${esc(t)}</h1></div>`;
@@ -174,7 +174,7 @@ function detailList(title, list, opts = {}) {
     : opts.type === 'expense'
       ? `<div><span class="mut">Spent</span><div class="detail-total">${eur(out)}</div></div>`
       : `<div><span class="mut">Balance</span><div class="detail-total ${inc-out >= 0 ? 'income-amt' : 'up'}">${eur(inc-out)}</div></div><div class="detail-mini"><span>In ${eur(inc)}</span><span>Out ${eur(out)}</span></div>`;
-  sheet(`<div class="detail-head"><div><h2 style="margin:0">${esc(title)}</h2>${opts.subtitle ? `<div class="mut">${esc(opts.subtitle)}</div>` : ''}</div><button class="icon-btn" aria-label="Close" onclick="closeSheet()">×</button></div>
+  sheet(`<div class="detail-head"><div><h2 style="margin:0">${esc(title)}</h2>${opts.subtitle ? `<div class="mut">${esc(opts.subtitle)}</div>` : ''}</div></div>
     <div class="card detail-summary"><div>${summary}</div><div class="mut">${sorted.length} transaction${sorted.length===1?'':'s'}</div></div>
     <div class="card detail-list">${rows || empty('🧾','Nothing recorded','There are no matching transactions yet.')}</div>`, true);
 }
@@ -200,7 +200,7 @@ function drillMerchant(name, from, to) {
 function categoryBreakdown(key = TODAY.slice(0,7)) {
   const l = expenses(inMonth(key));
   const rows = byCat(l).map(([n,v]) => `<button class="detail-item" onclick="drillCategory('${String(n).replace(/'/g,"\\'")}','${key}')"><div class="ico" style="background:${cat(n).color}22">${cat(n).icon}</div><div class="grow"><b>${esc(n)}</b><div class="mut">${l.filter(t=>t.category===n).length} transaction${l.filter(t=>t.category===n).length===1?'':'s'}</div></div><span class="amt">${eur(v)}</span></button>`).join('');
-  sheet(`<div class="detail-head"><div><h2 style="margin:0">Spending categories</h2><div class="mut">${monthName(key)}</div></div><button class="icon-btn" aria-label="Close" onclick="closeSheet()">×</button></div>
+  sheet(`<div class="detail-head"><div><h2 style="margin:0">Spending categories</h2><div class="mut">${monthName(key)}</div></div></div>
     <div class="card detail-list">${rows || empty('🏷️','No category spending yet','Expenses will appear here once you add them.')}</div>`, true);
 }
 
@@ -209,7 +209,7 @@ function monthOverview(key) {
   const cats = byCat(expenses(l)).slice(0, 6);
   const catRows = cats.map(([n,v]) => `<button class="detail-item" onclick="drillCategory('${String(n).replace(/'/g,"\\'")}','${key}')"><div class="ico" style="background:${cat(n).color}22">${cat(n).icon}</div><div class="grow"><b>${esc(n)}</b><div class="mut">${expenses(l).filter(t=>t.category===n).length} transaction${expenses(l).filter(t=>t.category===n).length===1?'':'s'}</div></div><span class="amt">${eur(v)}</span></button>`).join('');
   const recent = l.slice().sort((a,b)=>b.date.localeCompare(a.date)||String(b.time||'').localeCompare(String(a.time||''))).slice(0,8);
-  sheet(`<div class="detail-head"><div><h2 style="margin:0">${monthName(key)}</h2><div class="mut">Monthly breakdown</div></div><button class="icon-btn" aria-label="Close" onclick="closeSheet()">×</button></div>
+  sheet(`<div class="detail-head"><div><h2 style="margin:0">${monthName(key)}</h2><div class="mut">Monthly breakdown</div></div></div>
     <div class="month-overview-grid">
       <button onclick="drillMonth('income','${key}','Income · ${monthName(key)}')"><span class="mut">Income</span><b class="income-amt">${eur(inc)}</b><span class="tap-more">View ›</span></button>
       <button onclick="drillMonth('expense','${key}','Expenses · ${monthName(key)}')"><span class="mut">Spent</span><b>${eur(out)}</b><span class="tap-more">View ›</span></button>
@@ -227,7 +227,7 @@ function dailySpendingBreakdown(key) {
     const dayList = byDay[date], total = sum(dayList);
     return `<button class="detail-item day-row" onclick="drillPeriod('expense','${date}','${date}','Expenses · ${fdl(date)}')"><div class="day-badge"><b>${D(date).getDate()}</b><span>${D(date).toLocaleDateString('en-GB',{weekday:'short'})}</span></div><div class="grow"><b>${dayList.length} purchase${dayList.length===1?'':'s'}</b><div class="mut">${dayList.slice(0,2).map(t=>esc(t.merchant)).join(' · ')}${dayList.length>2?' · +'+(dayList.length-2)+' more':''}</div></div><span class="amt">${eur(total)}</span></button>`;
   }).join('');
-  sheet(`<div class="detail-head"><div><h2 style="margin:0">Daily spending</h2><div class="mut">${monthName(key)}</div></div><button class="icon-btn" aria-label="Close" onclick="closeSheet()">×</button></div>
+  sheet(`<div class="detail-head"><div><h2 style="margin:0">Daily spending</h2><div class="mut">${monthName(key)}</div></div></div>
     <div class="card detail-list">${rows || empty('📅','No daily spending yet','Expenses will appear here once you add them.')}</div>`, true);
 }
 
@@ -297,7 +297,7 @@ function txDetail(id) {
   const t = store.get(id); if (!t) return;
   const url = receiptUrl(t.receiptId), isIncome = t.type === 'income';
   sheet(`<div class="row">${txCatIco(t)}<div class="grow"><h2 style="margin:0">${esc(t.merchant)}</h2><span class="mut">${isIncome ? 'Income · ' : ''}${esc(t.category)}${t.subcategory ? ' · ' + esc(t.subcategory) : ''}</span></div></div><div class="big ${isIncome ? 'income-amt' : ''}" style="margin:12px 0">${isIncome ? '+' : ''}${eur(t.amount)}</div>
-  <div class="card">${[['Type', isIncome ? 'Income' : 'Expense'], ['Date', fdl(t.date) + ' · ' + (t.time || '')], [isIncome ? 'Received via' : 'Payment', t.payment], ...(isIncome || !(Number(t.taxTotal || 0) > 0) ? [] : [['Tax / VAT', eur(t.taxTotal)], ['Subtotal before tax', eur(t.subtotal ?? Math.max(0, Number(t.amount || 0) - Number(t.taxTotal || 0)))], ['Tax rate', (t.taxRates || []).length ? t.taxRates.join(', ') + '%' : '—']]), ['Notes', t.notes || '—'], ['Created', fd(t.created.slice(0, 10))], ['Last edited', fd(t.modified.slice(0, 10))]].map(([a, b]) => `<div class="row sp detail-row"><span class="mut">${a}</span><span>${esc(b)}</span></div>`).join('')}</div>
+  <div class="card">${[['Type', isIncome ? 'Income' : 'Expense'], ['Date', fdl(t.date) + ' · ' + (t.time || '')], [isIncome ? 'Received via' : 'Payment', t.payment], ...(isIncome ? [] : (Number(t.receiptTotal || t.amount) !== Number(t.amount) ? [['Receipt total', eur(t.receiptTotal || t.amount)], ['Your share', eur(t.amount)]] : [])), ...(isIncome || !(Number(t.taxTotal || 0) > 0) ? [] : [['Receipt Tax / VAT', eur(t.taxTotal)], ...(Number(t.receiptTotal || t.amount) !== Number(t.amount) ? [['Your VAT share', eur(t.personalTax ?? (Number(t.taxTotal || 0) * Number(t.amount || 0) / Math.max(Number(t.receiptTotal || t.amount), 0.01)))]] : []), ['Tax rate', (t.taxRates || []).length ? t.taxRates.join(', ') + '%' : '—']]), ['Notes', t.notes || '—'], ['Created', fd(t.created.slice(0, 10))], ['Last edited', fd(t.modified.slice(0, 10))]].map(([a, b]) => `<div class="row sp detail-row"><span class="mut">${a}</span><span>${esc(b)}</span></div>`).join('')}</div>
   ${url ? `<img class="rcp" alt="Attached document" src="${url}" style="max-height:220px;object-fit:contain;margin-bottom:10px">` : ''}
   <div class="btns" style="flex-wrap:wrap">${url ? `<button class="btn sec" onclick="rcpView('${id}')">View attachment</button>` : ''}<button class="btn sec" onclick="txForm('${id}')">Edit</button><button class="btn del" onclick="confirmDel('${id}')">Delete</button></div>`, true);
 }
@@ -505,6 +505,12 @@ function categorizeReceipt(merchant, text) {
 }
 
 /* ---------- expense form ---------- */
+function setMyShare(fraction) {
+  const total = Math.max(0, parseFloat($('#frtotal')?.value) || 0);
+  const mine = $('#fa');
+  if (!mine || !total) return;
+  mine.value = (Math.round(total * fraction * 100) / 100).toFixed(2);
+}
 function txForm(id, d) {
   if (id && store.get(id)?.type === 'income') return incomeForm(id, store.get(id));
   const t = id ? store.get(id) : d || { date: TODAY, payment: 'Debit Card', category: 'Groceries', notes: '', subcategory: '' };
@@ -512,8 +518,12 @@ function txForm(id, d) {
   const existingUrl = id && t.receiptId ? receiptUrl(t.receiptId) : '';
   sheet(`<h2>${id ? 'Edit expense' : d?.scanned ? 'Review & Save' : 'Manual expense'}</h2>${d?.scanned ? '<div class="tag ok scan-tag">Detected locally from receipt — please check every field</div>' : ''}
   ${d?.previewUrl ? `<img class="rcp receipt-mini" alt="Receipt being reviewed" src="${d.previewUrl}">` : existingUrl ? `<img class="rcp receipt-mini" alt="Attached receipt" src="${existingUrl}">` : ''}
-  <label for="fa">Amount</label><input id="fa" class="amt-in" type="number" inputmode="decimal" step="0.01" placeholder="0.00" value="${t.amount ?? ''}">
-  <div class="grid2"><div><label for="ftax">Tax / VAT (optional)</label><input id="ftax" type="number" inputmode="decimal" step="0.01" min="0" value="${Number(t.taxTotal || 0) ? t.taxTotal : ''}" placeholder="Auto-detected"></div><div><label>Tax rate</label><input value="${(t.taxRates || []).length ? esc(t.taxRates.join(', ') + '%') : ''}" placeholder="Auto-detected" readonly></div></div>
+  <div class="share-box">
+    <div class="grid2"><div><label for="frtotal">Receipt total</label><input id="frtotal" class="amt-in share-amount" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0.00" value="${t.receiptTotal ?? t.amount ?? ''}"></div><div><label for="fa">My amount</label><input id="fa" class="amt-in share-amount" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0.00" value="${t.amount ?? ''}"></div></div>
+    <div class="share-quick"><span class="mut">Shared purchase?</span><button type="button" class="pill" onclick="setMyShare(1)">I paid all</button><button type="button" class="pill" onclick="setMyShare(.5)">Half</button></div>
+    <p class="mut share-help">Only “My amount” is counted in your dashboard, budgets and analytics. The full receipt total stays saved with the receipt.</p>
+  </div>
+  <div class="grid2"><div><label for="ftax">Receipt Tax / VAT (optional)</label><input id="ftax" type="number" inputmode="decimal" step="0.01" min="0" value="${Number(t.taxTotal || 0) ? t.taxTotal : ''}" placeholder="Auto-detected"></div><div><label>Tax rate</label><input value="${(t.taxRates || []).length ? esc(t.taxRates.join(', ') + '%') : ''}" placeholder="Auto-detected" readonly></div></div>
   <label for="fm">Merchant / Payee</label><input id="fm" value="${esc(t.merchant || '')}" placeholder="e.g. Mercadona">
   <div class="grid2"><div><label for="fd">Date</label><input id="fd" type="date" value="${t.date || TODAY}"></div><div><label for="fpay">Payment</label><select id="fpay">${o(PAYMENTS, t.payment)}</select></div></div>
   <label for="fcat">Category</label><select id="fcat">${o(CATS.map(c => c.name), t.category)}</select>
@@ -523,8 +533,9 @@ function txForm(id, d) {
   <p id="err" class="up" role="alert"></p><button class="btn" onclick="saveTx('${id || ''}')">${id ? 'Save changes' : 'Save Expense'}</button>`, true);
 }
 async function saveTx(id) {
-  const a = parseFloat($('#fa').value), m = $('#fm').value.trim();
-  if (!(a > 0) || !m) { $('#err').textContent = 'Enter an amount and a merchant.'; return; }
+  const a = parseFloat($('#fa').value), receiptTotal = Math.max(0, parseFloat($('#frtotal')?.value) || a), m = $('#fm').value.trim();
+  if (!(a > 0) || !m) { $('#err').textContent = 'Enter your amount and a merchant.'; return; }
+  if (!(receiptTotal > 0)) { $('#err').textContent = 'Enter the receipt total.'; return; }
   const old = id ? store.get(id) : null, now = new Date().toISOString();
   let receiptId = old?.receiptId || null;
   try {
@@ -540,11 +551,13 @@ async function saveTx(id) {
     }
     const taxTotal = Math.max(0, parseFloat($('#ftax')?.value) || 0);
     const taxRates = draft?.taxRates || old?.taxRates || [];
-    const t = { id: id || uid('e'), type: 'expense', date: $('#fd').value || TODAY, time: old?.time || new Date().toTimeString().slice(0, 5), merchant: m, amount: a, taxTotal, taxRates, subtotal: Math.round(Math.max(0, a - taxTotal) * 100) / 100, category: $('#fcat').value, subcategory: $('#fsub').value.trim(), payment: $('#fpay').value, notes: $('#fn').value.trim(), receiptId, ocrText: draft?.ocrText || old?.ocrText || '', created: old?.created || now, modified: now };
+    const shareRatio = receiptTotal > 0 ? Math.max(0, Math.min(1, a / receiptTotal)) : 1;
+    const personalTax = Math.round(taxTotal * shareRatio * 100) / 100;
+    const t = { id: id || uid('e'), type: 'expense', date: $('#fd').value || TODAY, time: old?.time || new Date().toTimeString().slice(0, 5), merchant: m, amount: a, receiptTotal, taxTotal, personalTax, taxRates, receiptSubtotal: Math.round(Math.max(0, receiptTotal - taxTotal) * 100) / 100, subtotal: Math.round(Math.max(0, a - personalTax) * 100) / 100, category: $('#fcat').value, subcategory: $('#fsub').value.trim(), payment: $('#fpay').value, notes: $('#fn').value.trim(), receiptId, ocrText: draft?.ocrText || old?.ocrText || '', created: old?.created || now, modified: now };
     await store.save(t);
     if (draft?.previewUrl) URL.revokeObjectURL(draft.previewUrl);
     const wasScan = !!draft?.scanned; draft = null;
-    sheet(`<div style="text-align:center;padding:24px 0"><div style="font-size:54px">✓</div><h2>Expense saved</h2><p>${eur(a)} added to ${esc(t.category)}.</p></div><button class="btn" onclick="closeSheet();go('${wasScan ? 'home' : S.v === 'tx' ? 'tx' : 'home'}')">Done</button>`);
+    sheet(`<div style="text-align:center;padding:24px 0"><div style="font-size:54px">✓</div><h2>Expense saved</h2><p>${eur(a)} added to ${esc(t.category)}.</p>${Math.abs(receiptTotal-a) > 0.005 ? `<p class="mut">Receipt total: ${eur(receiptTotal)} · Your share: ${eur(a)}</p>` : ''}</div><button class="btn" onclick="closeSheet();go('${wasScan ? 'home' : S.v === 'tx' ? 'tx' : 'home'}')">Done</button>`);
   } catch (e) { const err = $('#err'); if (err) err.textContent = 'Could not save this expense. ' + (e.message || ''); }
 }
 
@@ -741,13 +754,13 @@ async function resetLocalData() {
   await reloadData(); closeSheet(); go('home'); toast('Local data erased. Expense Vault is ready for a fresh start.');
 }
 function exportCsv() {
-  const rows = [['ID', 'Type', 'Date', 'Time', 'Merchant / Source', 'Amount', 'Subtotal before tax', 'Tax / VAT', 'Tax rate(s)', 'Category', 'Subcategory', 'Payment / Received via', 'Notes'], ...TX.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(t => [t.id, t.type || 'expense', t.date, t.time, t.merchant, t.amount, t.type === 'income' ? '' : (t.subtotal ?? ''), t.type === 'income' ? '' : (t.taxTotal || ''), t.type === 'income' ? '' : ((t.taxRates || []).join(', ')), t.category, t.subcategory || '', t.payment, t.notes || ''])];
+  const rows = [['ID', 'Type', 'Date', 'Time', 'Merchant / Source', 'My Amount', 'Receipt Total', 'My Subtotal', 'Receipt Tax / VAT', 'My VAT Share', 'Tax rate(s)', 'Category', 'Subcategory', 'Payment / Received via', 'Notes'], ...TX.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(t => [t.id, t.type || 'expense', t.date, t.time, t.merchant, t.amount, t.type === 'income' ? '' : (t.receiptTotal ?? t.amount), t.type === 'income' ? '' : (t.subtotal ?? ''), t.type === 'income' ? '' : (t.taxTotal || ''), t.type === 'income' ? '' : (t.personalTax || ''), t.type === 'income' ? '' : ((t.taxRates || []).join(', ')), t.category, t.subcategory || '', t.payment, t.notes || ''])];
   const csv = rows.map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n'); downloadBlob(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }), `expenses-${TODAY}.csv`);
 }
 async function exportExcel() {
   try {
     await loadScript('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js', 'XLSX');
-    const txRows = TX.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(t => ({ Type: t.type || 'expense', Date: t.date, Time: t.time, 'Merchant / Source': t.merchant, Amount: t.amount, 'Subtotal before tax': t.type === 'income' ? '' : (t.subtotal ?? ''), 'Tax / VAT': t.type === 'income' ? '' : (t.taxTotal || ''), 'Tax rate(s)': t.type === 'income' ? '' : ((t.taxRates || []).join(', ')), Category: t.category, Subcategory: t.subcategory || '', 'Payment / Received via': t.payment, Notes: t.notes || '', Attachment: t.receiptId ? 'Yes' : 'No' }));
+    const txRows = TX.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(t => ({ Type: t.type || 'expense', Date: t.date, Time: t.time, 'Merchant / Source': t.merchant, 'My Amount': t.amount, 'Receipt Total': t.type === 'income' ? '' : (t.receiptTotal ?? t.amount), 'My Subtotal': t.type === 'income' ? '' : (t.subtotal ?? ''), 'Receipt Tax / VAT': t.type === 'income' ? '' : (t.taxTotal || ''), 'My VAT Share': t.type === 'income' ? '' : (t.personalTax || ''), 'Tax rate(s)': t.type === 'income' ? '' : ((t.taxRates || []).join(', ')), Category: t.category, Subcategory: t.subcategory || '', 'Payment / Received via': t.payment, Notes: t.notes || '', Attachment: t.receiptId ? 'Yes' : 'No' }));
     const months = [...new Set(TX.map(t => t.date.slice(0,7)))].sort();
     const summary = months.map(m => ({ Month: monthName(m), Income: incomeSum(inMonth(m)), Expenses: expenseSum(inMonth(m)), Balance: incomeSum(inMonth(m)) - expenseSum(inMonth(m)), Transactions: inMonth(m).length }));
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(txRows), 'Transactions'); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), 'Monthly Summary'); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([...CATS.map(c => ({ Type: 'Expense', Category: c.name })), ...INCOME_CATS.map(c => ({ Type: 'Income', Category: c.name }))]), 'Categories');

@@ -1,4 +1,4 @@
-const PAYMENTS_DEFAULT = ['Cash', 'Debit Card', 'Credit Card', 'Bank Transfer', 'Direct Debit', 'Other'];
+const PAYMENTS_DEFAULT = ['Cash', 'Card', 'Debit Card', 'Credit Card', 'Bank Transfer', 'Direct Debit', 'Other'];
 const CATS_DEFAULT = [
   ['Groceries','🛒','#2e9e6b'],['Dining','🍽️','#e8743b'],['Takeaway','🥡','#d9a520'],['Housing','🏠','#5b6ee1'],
   ['Utilities','💡','#e0b400'],['Internet & Phone','📶','#3aa0d8'],['Transport','🚌','#7a5bd6'],['Fuel','⛽','#c95151'],

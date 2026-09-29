@@ -397,9 +397,7 @@ function parseReceipt(text) {
   const ym = raw.match(/\b(20\d{2})[./-](\d{1,2})[./-](\d{1,2})\b/);
   if (ym) date = safeDate(+ym[1], +ym[2], +ym[3]) || TODAY;
   else if (dm) date = safeDate(+((dm[3].length === 2 ? '20' : '') + dm[3]), +dm[2], +dm[1]) || TODAY;
-  let payment = 'Other';
-  if (/(visa|mastercard|maestro|tarjeta|card|kontaktlos|contactless)/i.test(raw)) payment = 'Debit Card';
-  else if (/(cash|efectivo|barzahlung|bargeld)/i.test(raw)) payment = 'Cash';
+  const payment = detectPaymentMethod(raw);
   const merchant = detectMerchant(lines);
   const category = categorizeReceipt(merchant, low);
   const tax = parseTaxInfo(raw, Number.isFinite(amount) ? amount : null);
@@ -462,6 +460,25 @@ function safeDate(y, m, d) {
   if (y < 2000 || y > new Date().getFullYear() + 1 || m < 1 || m > 12 || d < 1 || d > 31) return '';
   const dt = new Date(y, m - 1, d); return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d ? localDateISO(dt) : '';
 }
+function detectPaymentMethod(raw) {
+  const s = String(raw || '').toLowerCase();
+
+  // Strong, explicit payment descriptions first.
+  if (/(direct\s*debit|domiciliaci[oó]n|recibo\s+domiciliado|lastschrift|sepa\s+lastschrift)/i.test(s)) return 'Direct Debit';
+  if (/(bank\s*transfer|transferencia|transfer\s+bank|wire\s+transfer|bank[üu]berweisung|[üu]berweisung|sepa\s+(?:transfer|credit)|bizum)/i.test(s)) return 'Bank Transfer';
+
+  if (/(credit\s*card|tarjeta\s+de\s+cr[eé]dito|tarjeta\s+cr[eé]dito|cr[eé]dito\s+visa|credito\s+visa|kreditkarte)/i.test(s)) return 'Credit Card';
+  if (/(debit\s*card|tarjeta\s+de\s+d[eé]bito|tarjeta\s+d[eé]bito|d[eé]bito\s+visa|debito\s+visa|debitkarte|ec[-\s]?karte|girocard)/i.test(s)) return 'Debit Card';
+
+  // Cash wording. Avoid matching "cashback" as payment.
+  if (/(^|[^a-z])(cash|efectivo|contado|barzahlung|bargeld|en\s+met[aá]lico)([^a-z]|$)/i.test(s) && !/cashback/i.test(s)) return 'Cash';
+
+  // Generic card/terminal evidence when debit-vs-credit is not printed.
+  if (/(visa|mastercard|maestro|amex|american\s+express|tarjeta|card\s+(?:payment|paid)|pago\s+con\s+tarjeta|pago\s+tarjeta|contactless|kontaktlos|tpv|dat[aá]fono|terminal\s+(?:id|payment)|chip\s*&?\s*pin|chip\s+and\s+pin)/i.test(s)) return 'Card';
+
+  return 'Other';
+}
+
 function detectMerchant(lines) {
   const reject = /(ticket|receipt|factura|invoice|cif|nif|vat|iva|tel\.?|www\.|https?|fecha|date|hora|time|total|importe|gracias|thank|cliente|customer)/i;
   const candidates = lines.slice(0, 10).filter(l => /[a-záéíóúüñäöüß]/i.test(l) && !reject.test(l) && l.length >= 2 && l.length <= 55);

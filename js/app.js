@@ -198,6 +198,33 @@ function categoryBreakdown(key = TODAY.slice(0,7)) {
     <div class="card detail-list">${rows || empty('🏷️','No category spending yet','Expenses will appear here once you add them.')}</div>`, true);
 }
 
+function monthOverview(key) {
+  const l = inMonth(key), inc = incomeSum(l), out = expenseSum(l), bal = inc - out;
+  const cats = byCat(expenses(l)).slice(0, 6);
+  const catRows = cats.map(([n,v]) => `<button class="detail-item" onclick="drillCategory('${String(n).replace(/'/g,"\\'")}','${key}')"><div class="ico" style="background:${cat(n).color}22">${cat(n).icon}</div><div class="grow"><b>${esc(n)}</b><div class="mut">${expenses(l).filter(t=>t.category===n).length} transaction${expenses(l).filter(t=>t.category===n).length===1?'':'s'}</div></div><span class="amt">${eur(v)}</span></button>`).join('');
+  const recent = l.slice().sort((a,b)=>b.date.localeCompare(a.date)||String(b.time||'').localeCompare(String(a.time||''))).slice(0,8);
+  sheet(`<div class="detail-head"><div><h2 style="margin:0">${monthName(key)}</h2><div class="mut">Monthly breakdown</div></div><button class="icon-btn" aria-label="Close" onclick="closeSheet()">×</button></div>
+    <div class="month-overview-grid">
+      <button onclick="drillMonth('income','${key}','Income · ${monthName(key)}')"><span class="mut">Income</span><b class="income-amt">${eur(inc)}</b><span class="tap-more">View ›</span></button>
+      <button onclick="drillMonth('expense','${key}','Expenses · ${monthName(key)}')"><span class="mut">Spent</span><b>${eur(out)}</b><span class="tap-more">View ›</span></button>
+      <button onclick="drillMonth('all','${key}','Activity · ${monthName(key)}')"><span class="mut">Balance</span><b class="${bal>=0?'income-amt':'up'}">${eur(bal)}</b><span class="tap-more">View ›</span></button>
+    </div>
+    <div class="card"><div class="row sp"><h2>Top spending categories</h2><button class="detail-link" onclick="categoryBreakdown('${key}')">See all ›</button></div>${catRows || '<p class="mut">No spending this month.</p>'}</div>
+    <div class="card"><div class="row sp"><h2>Recent activity</h2><button class="detail-link" onclick="drillMonth('all','${key}','Activity · ${monthName(key)}')">See all ›</button></div>${recent.map(txRow).join('') || '<p class="mut">No activity this month.</p>'}</div>`, true);
+}
+
+function dailySpendingBreakdown(key) {
+  const l = expenses(inMonth(key));
+  const byDay = {};
+  l.forEach(t => { (byDay[t.date] ||= []).push(t); });
+  const rows = Object.keys(byDay).sort((a,b)=>b.localeCompare(a)).map(date => {
+    const dayList = byDay[date], total = sum(dayList);
+    return `<button class="detail-item day-row" onclick="drillPeriod('expense','${date}','${date}','Expenses · ${fdl(date)}')"><div class="day-badge"><b>${D(date).getDate()}</b><span>${D(date).toLocaleDateString('en-GB',{weekday:'short'})}</span></div><div class="grow"><b>${dayList.length} purchase${dayList.length===1?'':'s'}</b><div class="mut">${dayList.slice(0,2).map(t=>esc(t.merchant)).join(' · ')}${dayList.length>2?' · +'+(dayList.length-2)+' more':''}</div></div><span class="amt">${eur(total)}</span></button>`;
+  }).join('');
+  sheet(`<div class="detail-head"><div><h2 style="margin:0">Daily spending</h2><div class="mut">${monthName(key)}</div></div><button class="icon-btn" aria-label="Close" onclick="closeSheet()">×</button></div>
+    <div class="card detail-list">${rows || empty('📅','No daily spending yet','Expenses will appear here once you add them.')}</div>`, true);
+}
+
 /* ---------- home ---------- */
 function home() {
   const k = monthKey(S.mo), cur = S.mo === 0, l = inMonth(k), out = expenseSum(l), inc = incomeSum(l), balance = inc - out, budget = Number(SETTINGS.monthlyBudget || 0), rem = budget - out;
@@ -207,12 +234,16 @@ function home() {
   const dv = Array.from({ length: dim }, (_, i) => expenseSum(l.filter(t => +t.date.slice(8) === i + 1)));
   const pct = budget > 0 ? Math.min(100, out / budget * 100) : 0;
   return `<div class="month"><button aria-label="Previous month" onclick="S.mo--;render()">‹</button><h1 style="margin:0;font-size:20px">${monthName(k)}</h1><button aria-label="Next month" ${S.mo >= 0 ? 'disabled style="opacity:.3"' : ''} onclick="S.mo++;render()">›</button></div>
-  <div class="card hero"><div class="row sp"><span>${cur ? 'This month · balance' : 'Monthly balance'}</span><button class="icon-btn hero-search" aria-label="Search" onclick="gsearch()">⌕</button></div><div class="big">${eur(balance)}</div>
-  <div class="row sp" style="margin-top:10px"><span>Income <b>${eur(inc)}</b></span><span>Expenses <b>${eur(out)}</b></span></div>
-  ${budget > 0 ? `<div class="bar" style="margin:12px 0 8px"><i style="width:${pct}%"></i></div><div class="row sp"><span>${rem >= 0 ? eur(rem) + ' budget remaining' : eur(-rem) + ' over budget'}</span><span>of ${eur(budget)}</span></div>` : '<div style="margin-top:10px">No monthly budget set</div>'}</div>
+  <div class="card hero"><div class="row sp"><span>${cur ? 'This month · balance' : 'Monthly balance'}</span><button class="icon-btn hero-search" aria-label="Search" onclick="gsearch()">⌕</button></div>
+  <button class="hero-summary" onclick="monthOverview('${k}')" aria-label="Open monthly breakdown">
+    <div class="big">${eur(balance)}</div>
+    <div class="row sp hero-money-row"><span>Income <b>${eur(inc)}</b></span><span>Expenses <b>${eur(out)}</b></span></div>
+    ${budget > 0 ? `<div class="bar" style="margin:12px 0 8px"><i style="width:${pct}%"></i></div><div class="row sp"><span>${rem >= 0 ? eur(rem) + ' budget remaining' : eur(-rem) + ' over budget'}</span><span>of ${eur(budget)}</span></div>` : '<div style="margin-top:10px">No monthly budget set</div>'}
+    <span class="hero-breakdown-label">View monthly breakdown ›</span>
+  </button></div>
   <div class="grid2"><button class="card stat tap-card" onclick="drillPeriod('expense',TODAY,TODAY,'Today’s expenses')"><span class="mut">Today spent</span><b>${eur(expenseSum(TX.filter(t => t.date === TODAY)))}</b><span class="tap-more">View details ›</span></button><button class="card stat tap-card" onclick="drillPeriod('expense',add(TODAY,-6),TODAY,'This week’s expenses')"><span class="mut">This week spent</span><b>${eur(expenseSum(wk))}</b><span class="tap-more">View details ›</span></button>
   <button class="card stat tap-card" onclick="drillMonth('income','${k}','Income · ${monthName(k)}')"><span class="mut">Income this month</span><b class="income-amt">${eur(inc)}</b><span class="tap-more">View details ›</span></button><button class="card stat tap-card" onclick="drillMonth('expense','${k}','Expenses · ${monthName(k)}')"><span class="mut">Monthly spending</span><b>${eur(out)}</b><span class="tap-more">View details ›</span></button></div>
-  <div class="card" style="margin-top:14px"><h2>Daily spending</h2>${bars(dv, dv.map((_, i) => (i + 1) % 5 === 0 ? i + 1 : ''))}</div>
+  <button class="card daily-spending-card" style="margin-top:14px" onclick="dailySpendingBreakdown('${k}')" aria-label="Open daily spending breakdown"><div class="row sp"><h2>Daily spending</h2><span class="tap-more" style="margin:0">View days ›</span></div>${bars(dv, dv.map((_, i) => (i + 1) % 5 === 0 ? i + 1 : ''))}</button>
   <div class="card"><div class="row sp"><h2>Where it went</h2><button class="mut detail-link" onclick="categoryBreakdown('${k}')">View categories ›</button></div>${expenses(l).length ? donutCard(expenses(l)) : '<p class="mut">No spending this month.</p>'}</div>
   <div class="card"><div class="row sp"><h2>Recent activity</h2><button class="mut" onclick="go('tx')">See all</button></div>${TX.slice().sort((a, b) => b.date.localeCompare(a.date) || b.created.localeCompare(a.created)).slice(0, 6).map(txRow).join('') || empty('🧾', 'No activity yet', 'Add your first income or expense.', 'Add transaction', 'addChoose()')}</div>`;
 }

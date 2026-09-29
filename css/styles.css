@@ -86,3 +86,18 @@ input[type=color]{padding:5px;height:50px}.rgrid button{min-width:0;overflow:hid
 
 .budget-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}
 .budget-actions .detail-link{color:var(--acc);font-weight:650;text-align:left}
+
+/* Dashboard progressive disclosure */
+.hero-summary{display:block;width:100%;text-align:left;color:#fff;padding:0;margin-top:2px}
+.hero-summary .big{color:#fff}
+.hero-money-row{margin-top:10px}
+.hero-breakdown-label{display:block;margin-top:12px;font-size:13px;font-weight:700;color:#fff}
+.daily-spending-card{display:block;width:100%;text-align:left;color:inherit}
+.daily-spending-card h2{margin:0}
+.month-overview-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.month-overview-grid button{background:var(--card);border-radius:var(--r);box-shadow:var(--sh);padding:14px;text-align:left;min-width:0;color:inherit}
+.month-overview-grid b{display:block;font-size:18px;margin-top:3px;overflow-wrap:anywhere}
+.day-badge{width:46px;height:52px;border-radius:13px;background:var(--acc2);display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--acc);flex:none}
+.day-badge b{font-size:18px;line-height:1}
+.day-badge span{font-size:11px;margin-top:4px;font-weight:700}
+@media(max-width:420px){.month-overview-grid{grid-template-columns:1fr 1fr}.month-overview-grid button:last-child{grid-column:1/-1}.hero-money-row{gap:8px;align-items:flex-start}.hero-money-row span:last-child{text-align:right}}

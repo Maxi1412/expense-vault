@@ -13,6 +13,7 @@ let ocrWorker = null;
 let ocrLogger = null;
 let deferredInstallPrompt = null;
 let restorePayload = null;
+const CLEAN_START_MARKER = 'expense-vault-clean-start-2026-09-30-v1';
 
 const TODAY = localDateISO(new Date());
 const S = {
@@ -53,8 +54,20 @@ const catIco = c => `<div class="ico" style="background:${cat(c).color}22" aria-
 const txCatIco = t => `<div class="ico" style="background:${txCat(t).color}22" aria-hidden="true">${txCat(t).icon}</div>`;
 const status = p => p >= 100 ? ['ov', 'Over budget', 'var(--bad)'] : p >= 80 ? ['wn', 'Approaching', 'var(--warn)'] : ['ok', 'On track', 'var(--ok)'];
 
+async function clearTestingDataOnce() {
+  try {
+    if (localStorage.getItem(CLEAN_START_MARKER) === 'done') return;
+    await DB.clear('transactions');
+    await DB.clear('receipts');
+    localStorage.setItem(CLEAN_START_MARKER, 'done');
+  } catch (e) {
+    console.error('Could not clear testing data automatically', e);
+  }
+}
+
 async function init() {
   await DB.open();
+  await clearTestingDataOnce();
   await reloadData();
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredInstallPrompt = e; if (S.v === 'more' || S.v === 'settings') render(); });
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
@@ -785,7 +798,7 @@ function settings() {
   <div class="card"><h2>Data</h2><button class="item" onclick="go('backup')"><b class="grow">Export & Backup</b>›</button>${deferredInstallPrompt ? '<button class="item" onclick="installApp()"><b class="grow">Install Expense Vault</b>›</button>' : ''}</div>
   <div class="card"><h2>Receipt recognition</h2><label for="ocrlang">OCR languages</label><select id="ocrlang" onchange="setOcrLanguages(this.value)"><option value="eng" ${SETTINGS.ocrLanguages==='eng'?'selected':''}>English</option><option value="eng+spa" ${SETTINGS.ocrLanguages==='eng+spa'?'selected':''}>English + Spanish</option><option value="eng+deu" ${SETTINGS.ocrLanguages==='eng+deu'?'selected':''}>English + German</option><option value="eng+spa+deu" ${SETTINGS.ocrLanguages==='eng+spa+deu'?'selected':''}>English + Spanish + German</option></select><p class="mut">More languages improve coverage but make the first OCR download larger.</p></div>
   <div class="card"><h2>Privacy</h2><p class="mut">Transactions and receipt images are stored locally in this browser. OCR is performed in your browser using Tesseract.js; no paid OCR account or API key is used.</p></div>
-  <div class="card"><h2>Testing</h2><p class="mut">Optional: add sample income and expense transactions so you can test charts and filters. They can be deleted like normal transactions.</p><button class="btn sec" onclick="loadDemoData()">Add demo transactions</button></div>`;
+`;
 }
 async function setTheme(k) { S.theme = k; SETTINGS.theme = k; await saveMeta('settings', SETTINGS); render(); }
 async function setMonthlyBudget(v) { SETTINGS.monthlyBudget = Math.max(0, Number(v) || 0); await saveMeta('settings', SETTINGS); }
@@ -796,20 +809,5 @@ async function addPayment() { const v = $('#newpay').value.trim(); if (!v || PAY
 async function removePayment(i) { if (PAYMENTS_DEFAULT.includes(PAYMENTS[i])) return; PAYMENTS.splice(i,1); await saveMeta('payments', PAYMENTS); paymentMethods(); }
 function profile() { return back('Profile') + `<div class="card" style="text-align:center"><div class="ico profile-avatar">${esc((PROFILE.name || 'M')[0])}</div><h2>${esc(PROFILE.name || 'My Profile')}</h2></div><div class="card"><label for="pn">Name</label><input id="pn" value="${esc(PROFILE.name || '')}"><div class="row sp profile-row"><span class="mut">Currency</span><b>${esc(PROFILE.currency || 'EUR')}</b></div><div class="row sp profile-row"><span class="mut">Language preference</span><b>${esc(PROFILE.language || 'English')}</b></div><button class="btn" style="margin-top:16px" onclick="saveProfile()">Save</button></div>`; }
 async function saveProfile() { PROFILE.name = $('#pn').value.trim() || PROFILE.name || 'My Profile'; await saveMeta('profile', PROFILE); render(); }
-
-/* ---------- demo data, useful for testing only ---------- */
-async function loadDemoData() {
-  if (TX.length && !confirm('This will add demo transactions alongside your existing data. Continue?')) return;
-  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-  const pool = [['Mercadona','Groceries',12,68,'Debit Card'],['Lidl','Groceries',9,44,'Debit Card'],['Local Restaurant','Dining',18,55,'Credit Card'],['Repsol','Fuel',30,58,'Credit Card'],['Pharmacy','Pharmacy',5,28,'Debit Card'],['Amazon','Shopping',10,70,'Credit Card']];
-  await store.save({id:uid('i'),type:'income',date:add(TODAY,-58),time:'10:00',merchant:'Salary',amount:900,category:'Salary',subcategory:'',payment:'Bank Transfer',notes:'Demo salary',receiptId:null,ocrText:'',created:new Date().toISOString(),modified:new Date().toISOString()});
-  await store.save({id:uid('i'),type:'income',date:add(TODAY,-21),time:'22:30',merchant:'Tips',amount:85,category:'Tips',subcategory:'',payment:'Cash',notes:'Demo tips',receiptId:null,ocrText:'',created:new Date().toISOString(),modified:new Date().toISOString()});
-  await store.save({id:uid('i'),type:'income',date:add(TODAY,-8),time:'16:00',merchant:'Private client',amount:120,category:'Private Work',subcategory:'',payment:'Bank Transfer',notes:'Demo private work',receiptId:null,ocrText:'',created:new Date().toISOString(),modified:new Date().toISOString()});
-  for (let daysAgo=70; daysAgo>=0; daysAgo--) {
-    const date=add(TODAY,-daysAgo); if (D(date).getDate()===1) await store.save({id:uid('e'),type:'expense',date,time:'09:00',merchant:'Rent',amount:700,category:'Housing',subcategory:'',payment:'Bank Transfer',notes:'Monthly rent',receiptId:null,ocrText:'',created:new Date().toISOString(),modified:new Date().toISOString()});
-    if (rnd()<0.72) { const p=pool[Math.floor(rnd()*pool.length)]; await store.save({id:uid('e'),type:'expense',date,time:'12:00',merchant:p[0],amount:Math.round((p[2]+rnd()*(p[3]-p[2]))*100)/100,category:p[1],subcategory:'',payment:p[4],notes:'',receiptId:null,ocrText:'',created:new Date().toISOString(),modified:new Date().toISOString()}); }
-  }
-  render(); toast('Demo transactions added.');
-}
 
 init().catch(e => { document.body.innerHTML = `<main style="padding:24px;font-family:system-ui"><h1>Expense Vault</h1><p>Could not open the local database.</p><pre>${esc(e.message || e)}</pre></main>`; });

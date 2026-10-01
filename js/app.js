@@ -157,21 +157,47 @@ const store = {
   all: () => TX,
   get: id => TX.find(t => t.id === id),
   async save(t) {
+    const before = await DB.exportAll();
+    const existed = before.transactions.some(x => x.id === t.id);
+    const expected = before.transactions.length + (existed ? 0 : 1);
     await DB.put('transactions', t);
+    const after = await DB.all('transactions');
+    if (after.length !== expected || !after.some(x => x.id === t.id)) {
+      await DB.importAll(before);
+      await reloadData();
+      throw new Error('Save integrity check failed. Your previous records were restored automatically.');
+    }
     await reloadData();
     await writeSafetySnapshot();
   },
   async remove(id) {
-    const t = this.get(id);
+    const before = await DB.exportAll();
+    const t = before.transactions.find(x => x.id === id);
+    if (!t) return;
     await DB.remove('transactions', id);
     const remaining = await DB.all('transactions');
-    if (t?.receiptId && !remaining.some(x => x.receiptId === t.receiptId)) await deleteReceipt(t.receiptId);
+    if (remaining.length !== before.transactions.length - 1 || remaining.some(x => x.id === id)) {
+      await DB.importAll(before);
+      await reloadData();
+      throw new Error('Delete integrity check failed. Your previous records were restored automatically.');
+    }
+    if (t.receiptId && !remaining.some(x => x.receiptId === t.receiptId)) await deleteReceipt(t.receiptId);
     await reloadData();
     await writeSafetySnapshot();
   }
 };
 
-async function saveMeta(key, value) { await DB.setMeta(key, value); await reloadData(); await writeSafetySnapshot(); }
+async function saveMeta(key, value) {
+  await DB.setMeta(key, value);
+  if (key === 'categories') CATS = structuredClone(value);
+  else if (key === 'incomeCategories') INCOME_CATS = structuredClone(value);
+  else if (key === 'budgets') BUDGETS = structuredClone(value);
+  else if (key === 'accounts') ACCOUNTS = structuredClone(value);
+  else if (key === 'payments') PAYMENTS = structuredClone(value);
+  else if (key === 'profile') PROFILE = structuredClone(value);
+  else if (key === 'settings') SETTINGS = structuredClone(value);
+  await writeSafetySnapshot();
+}
 async function deleteReceipt(id) {
   if (!id) return;
   const u = RECEIPT_URLS.get(id); if (u) URL.revokeObjectURL(u);

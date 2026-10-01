@@ -131,12 +131,49 @@ const SafetyDB = (() => {
 
   async function save(payload) {
     const db = await open();
-    return new Promise((resolve, reject) => {
+    const savedAt = new Date().toISOString();
+    const key = 'snapshot:' + savedAt + ':' + Math.random().toString(36).slice(2,7);
+    await new Promise((resolve, reject) => {
       const tx = db.transaction('snapshots', 'readwrite');
-      tx.objectStore('snapshots').put({ key: 'lastGood', savedAt: new Date().toISOString(), payload });
+      const store = tx.objectStore('snapshots');
+      store.put({ key: 'lastGood', savedAt, payload });
+      store.put({ key, savedAt, payload });
       tx.oncomplete = () => resolve(true);
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error || new Error('Safety snapshot failed'));
+    });
+    await prune(20);
+    return true;
+  }
+
+  async function list() {
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      const req = db.transaction('snapshots', 'readonly').objectStore('snapshots').getAll();
+      req.onsuccess = () => resolve((req.result || []).filter(x => String(x.key).startsWith('snapshot:')).sort((a,b)=>String(b.savedAt).localeCompare(String(a.savedAt))));
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function getSnapshot(key) {
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      const req = db.transaction('snapshots', 'readonly').objectStore('snapshots').get(key);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function prune(limit = 20) {
+    const rows = await list();
+    if (rows.length <= limit) return;
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('snapshots', 'readwrite');
+      const store = tx.objectStore('snapshots');
+      rows.slice(limit).forEach(x => store.delete(x.key));
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
     });
   }
 
@@ -178,5 +215,5 @@ const SafetyDB = (() => {
     });
   }
 
-  return { open, save, get, clear, setFlag, getFlag };
+  return { open, save, get, list, getSnapshot, clear, setFlag, getFlag };
 })();

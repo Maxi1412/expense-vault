@@ -107,6 +107,136 @@ async function restoreSafetyHistory(key) {
   go('home');
 }
 
+function recoveryObjects(value, out = []) {
+  if (Array.isArray(value)) {
+    value.forEach(v => recoveryObjects(v, out));
+  } else if (value && typeof value === 'object') {
+    out.push(value);
+    Object.values(value).forEach(v => {
+      if (v && typeof v === 'object') recoveryObjects(v, out);
+    });
+  }
+  return out;
+}
+function normalizeRecoveredTransaction(x) {
+  if (!x || typeof x !== 'object') return null;
+  const amount = Number(x.amount ?? x.value ?? x.total ?? x.received ?? x.cost);
+  const date = String(x.date ?? x.transactionDate ?? x.receivedDate ?? x.createdAt ?? x.created ?? '').slice(0,10);
+  const merchant = String(x.merchant ?? x.source ?? x.payer ?? x.payee ?? x.description ?? x.name ?? '').trim();
+  if (!(amount > 0) || !/^2026-(09-(30)|10-\d{2})$/.test(date) || !merchant) return null;
+  const hay = `${merchant} ${x.notes || ''} ${x.category || ''}`.toLowerCase();
+  if (/(demo|sample|example|testing|test transaction)/i.test(hay)) return null;
+  let type = x.type === 'income' || /salary|tip|private work|gift|support|refund|income/i.test(String(x.category || '')) ? 'income' : 'expense';
+  const id = String(x.id || x.transactionId || `forensic-${type}-${date}-${amount}-${merchant}`).replace(/[^a-zA-Z0-9._-]/g,'_').slice(0,120);
+  return {
+    id,
+    type,
+    date,
+    time: String(x.time || '').slice(0,5),
+    merchant,
+    amount,
+    receiptTotal: type === 'expense' ? Number(x.receiptTotal ?? amount) : undefined,
+    taxTotal: type === 'expense' ? Number(x.taxTotal || 0) : undefined,
+    personalTax: type === 'expense' ? Number(x.personalTax || 0) : undefined,
+    taxRates: Array.isArray(x.taxRates) ? x.taxRates : [],
+    subtotal: type === 'expense' ? Number(x.subtotal ?? Math.max(0, amount - Number(x.personalTax || 0))) : undefined,
+    receiptSubtotal: type === 'expense' ? Number(x.receiptSubtotal ?? Math.max(0, Number(x.receiptTotal ?? amount) - Number(x.taxTotal || 0))) : undefined,
+    category: String(x.category || (type === 'income' ? 'Other Income' : 'Other')),
+    subcategory: String(x.subcategory || ''),
+    payment: String(x.payment || x.method || 'Other'),
+    notes: String(x.notes || '') + (x.notes ? ' · ' : '') + 'Recovered from legacy local browser storage.',
+    receiptId: null,
+    ocrText: '',
+    created: String(x.created || x.createdAt || new Date().toISOString()),
+    modified: new Date().toISOString()
+  };
+}
+function normalizeRecoveredAccount(x) {
+  if (!x || typeof x !== 'object') return null;
+  const balance = Number(x.balance ?? x.currentBalance ?? x.cashBalance);
+  const name = String(x.name ?? x.accountName ?? x.label ?? '').trim();
+  if (!Number.isFinite(balance) || !name) return null;
+  const hay = `${name} ${x.type || ''}`.toLowerCase();
+  if (/(demo|sample|example|testing)/i.test(hay)) return null;
+  if (!/(cash|bank|saving|wallet|account|current)/i.test(hay)) return null;
+  return { id:String(x.id || `forensic-account-${name}`).replace(/[^a-zA-Z0-9._-]/g,'_').slice(0,120), name, type:String(x.type || (/cash|wallet/i.test(hay)?'Cash':'Bank')), balance, created:String(x.created || new Date().toISOString()), updatedAt:new Date().toISOString() };
+}
+async function readLegacyDb(name) {
+  return new Promise(resolve => {
+    try {
+      const req = indexedDB.open(name);
+      req.onerror = () => resolve([]);
+      req.onsuccess = async () => {
+        const db = req.result, rows = [];
+        const stores = Array.from(db.objectStoreNames || []);
+        for (const storeName of stores) {
+          try {
+            const vals = await new Promise(res => {
+              const q = db.transaction(storeName,'readonly').objectStore(storeName).getAll();
+              q.onsuccess = () => res(q.result || []);
+              q.onerror = () => res([]);
+            });
+            rows.push(...vals);
+          } catch (_) {}
+        }
+        db.close();
+        resolve(rows);
+      };
+    } catch (_) { resolve([]); }
+  });
+}
+async function forensicRecoverLocalData() {
+  const found = [];
+  try {
+    if (indexedDB.databases) {
+      const dbs = await indexedDB.databases();
+      for (const info of dbs || []) {
+        const name = String(info.name || '');
+        if (!name || name === 'expense-vault' || name === 'expense-vault-safety') continue;
+        found.push(...await readLegacyDb(name));
+      }
+    }
+  } catch (_) {}
+  for (const storage of [localStorage, sessionStorage]) {
+    try {
+      for (let i=0;i<storage.length;i++) {
+        const key=storage.key(i), raw=storage.getItem(key);
+        if (!raw || raw.length < 2) continue;
+        try { found.push(JSON.parse(raw)); } catch (_) {}
+      }
+    } catch (_) {}
+  }
+  const objects = [];
+  found.forEach(v => recoveryObjects(v, objects));
+  const currentKeys = new Set(TX.map(t => `${t.type||'expense'}|${t.date}|${Number(t.amount).toFixed(2)}|${String(t.merchant).toLowerCase()}`));
+  let restoredTx = 0;
+  for (const obj of objects) {
+    const t = normalizeRecoveredTransaction(obj);
+    if (!t) continue;
+    const key = `${t.type}|${t.date}|${Number(t.amount).toFixed(2)}|${t.merchant.toLowerCase()}`;
+    if (currentKeys.has(key)) continue;
+    await DB.put('transactions', t);
+    currentKeys.add(key);
+    restoredTx++;
+  }
+  const accountKeys = new Set(ACCOUNTS.map(a => `${a.name.toLowerCase()}|${Number(a.balance).toFixed(2)}`));
+  let restoredAccounts = 0;
+  for (const obj of objects) {
+    const a = normalizeRecoveredAccount(obj);
+    if (!a) continue;
+    const key = `${a.name.toLowerCase()}|${Number(a.balance).toFixed(2)}`;
+    if (accountKeys.has(key)) continue;
+    ACCOUNTS.push(a); accountKeys.add(key); restoredAccounts++;
+  }
+  if (restoredAccounts) await DB.setMeta('accounts', ACCOUNTS);
+  if (restoredTx || restoredAccounts) {
+    await reloadData();
+    recoveryAvailable = false;
+    await writeSafetySnapshot();
+  }
+  return { restoredTx, restoredAccounts };
+}
+
 async function recoverKnownRealDataOnce() {
   const marker = await SafetyDB.getFlag('recovery-2026-10-01-v1');
   if (marker) return;
@@ -149,6 +279,7 @@ async function init() {
   await DB.open();
   await SafetyDB.open();
   await reloadData();
+  await forensicRecoverLocalData();
   await recoverKnownRealDataOnce();
   await refreshSafetyStatus();
   recoveryAvailable = TX.length === 0 && safetyStatus.count > 0;

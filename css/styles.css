@@ -121,3 +121,7 @@ input[type=color]{padding:5px;height:50px}.rgrid button{min-width:0;overflow:hid
 
 .funds-card{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;text-align:left;color:inherit}
 .funds-card b{display:block;font-size:24px;margin-top:2px}
+
+.recovery-alert{border:1px solid var(--warn)}
+.recovery-alert b{display:block;margin-bottom:4px}
+.recovery-alert .btn{margin-top:10px}

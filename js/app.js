@@ -89,7 +89,7 @@ async function restoreSafetySnapshot() {
 }
 
 async function recoverKnownRealDataOnce() {
-  const marker = await DB.getMeta('recovery-2026-10-01-v1', false);
+  const marker = await SafetyDB.getFlag('recovery-2026-10-01-v1');
   if (marker) return;
   const alreadyThere = TX.some(t =>
     (t.type || 'expense') === 'expense' &&
@@ -122,7 +122,7 @@ async function recoverKnownRealDataOnce() {
       modified: now
     });
   }
-  await DB.setMeta('recovery-2026-10-01-v1', true);
+  await SafetyDB.setFlag('recovery-2026-10-01-v1', true);
   await reloadData();
 }
 

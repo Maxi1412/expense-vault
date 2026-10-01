@@ -47,6 +47,10 @@ const incomeCat = n => INCOME_CATS.find(c => c.name === n) || INCOME_CATS.find(c
 const txCat = t => t?.type === 'income' ? incomeCat(t.category) : cat(t?.category);
 const monthKey = off => { const d = D(TODAY); d.setDate(1); d.setMonth(d.getMonth() + off); return ds(d).slice(0, 7); };
 const monthName = k => D(k + '-01').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+const monthOffsetForDate = date => {
+  const d = D(String(date).slice(0,10)), now = D(TODAY);
+  return (d.getFullYear() - now.getFullYear()) * 12 + (d.getMonth() - now.getMonth());
+};
 const inMonth = k => TX.filter(t => t.date.startsWith(k));
 const between = (a, b) => TX.filter(t => t.date >= a && t.date <= b);
 const uid = p => `${p}${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
@@ -55,10 +59,8 @@ const txCatIco = t => `<div class="ico" style="background:${txCat(t).color}22" a
 const status = p => p >= 100 ? ['ov', 'Over budget', 'var(--bad)'] : p >= 80 ? ['wn', 'Approaching', 'var(--warn)'] : ['ok', 'On track', 'var(--ok)'];
 
 let safetyStatus = { savedAt: '', count: 0 };
-let recoveryAvailable = false;
 
 async function writeSafetySnapshot() {
-  if (recoveryAvailable) return;
   try {
     const payload = await DB.exportAll();
     await SafetyDB.save(payload);
@@ -77,17 +79,17 @@ async function refreshSafetyStatus() {
 }
 async function restoreSafetySnapshotPrompt() {
   const snap = await SafetyDB.get();
-  if (!snap?.payload) return toast('No safety recovery copy is available yet.');
-  sheet(`<h2>Restore safety copy?</h2><div class="card"><b>${snap.payload.transactions?.length || 0} transactions</b><div class="mut">${snap.payload.receipts?.length || 0} attachments</div><div class="mut">Saved ${new Date(snap.savedAt).toLocaleString()}</div></div><p class="mut">This replaces the current main database with the last automatically saved good copy.</p><div class="btns"><button class="btn ghost" onclick="closeSheet()">Cancel</button><button class="btn" onclick="restoreSafetySnapshot()">Restore</button></div>`);
+  if (!snap?.payload) return toast('No safety copy is available yet.');
+  sheet(`<h2>Restore safety copy?</h2><div class="card"><b>${snap.payload.transactions?.length || 0} transactions</b><div class="mut">${snap.payload.receipts?.length || 0} attachments</div><div class="mut">Saved ${new Date(snap.savedAt).toLocaleString()}</div></div><p class="mut">This replaces the current local database.</p><div class="btns"><button class="btn ghost" onclick="closeSheet()">Cancel</button><button class="btn" onclick="restoreSafetySnapshot()">Restore</button></div>`);
 }
 async function restoreSafetySnapshot() {
   const snap = await SafetyDB.get();
-  if (!snap?.payload) return toast('No safety recovery copy is available.');
+  if (!snap?.payload) return toast('No safety copy is available.');
   await DB.importAll(snap.payload);
   await reloadData();
-  recoveryAvailable = false;
   await writeSafetySnapshot();
   closeSheet();
+  S.mo = 0;
   go('home');
 }
 async function safetyHistory() {
@@ -98,195 +100,19 @@ async function safetyHistory() {
 async function restoreSafetyHistory(key) {
   const snap = await SafetyDB.getSnapshot(key);
   if (!snap?.payload) return toast('That recovery snapshot is no longer available.');
-  await writeSafetySnapshot();
   await DB.importAll(snap.payload);
   await reloadData();
-  recoveryAvailable = false;
   await writeSafetySnapshot();
   closeSheet();
+  S.mo = 0;
   go('home');
-}
-
-function recoveryObjects(value, out = [], seen = new WeakSet()) {
-  if (!value || typeof value !== 'object') return out;
-  if (seen.has(value)) return out;
-  seen.add(value);
-  if (Array.isArray(value)) {
-    value.forEach(v => recoveryObjects(v, out, seen));
-  } else {
-    out.push(value);
-    Object.values(value).forEach(v => {
-      if (v && typeof v === 'object') recoveryObjects(v, out, seen);
-    });
-  }
-  return out;
-}
-function normalizeRecoveredTransaction(x) {
-  if (!x || typeof x !== 'object') return null;
-  const amount = Number(x.amount ?? x.value ?? x.total ?? x.received ?? x.cost);
-  const date = String(x.date ?? x.transactionDate ?? x.receivedDate ?? x.createdAt ?? x.created ?? '').slice(0,10);
-  const merchant = String(x.merchant ?? x.source ?? x.payer ?? x.payee ?? x.description ?? x.name ?? '').trim();
-  if (!(amount > 0) || !/^2026-(09-(30)|10-\d{2})$/.test(date) || !merchant) return null;
-  const hay = `${merchant} ${x.notes || ''} ${x.category || ''}`.toLowerCase();
-  if (/(demo|sample|example|testing|test transaction)/i.test(hay)) return null;
-  let type = x.type === 'income' || /salary|tip|private work|gift|support|refund|income/i.test(String(x.category || '')) ? 'income' : 'expense';
-  const id = String(x.id || x.transactionId || `forensic-${type}-${date}-${amount}-${merchant}`).replace(/[^a-zA-Z0-9._-]/g,'_').slice(0,120);
-  return {
-    id,
-    type,
-    date,
-    time: String(x.time || '').slice(0,5),
-    merchant,
-    amount,
-    receiptTotal: type === 'expense' ? Number(x.receiptTotal ?? amount) : undefined,
-    taxTotal: type === 'expense' ? Number(x.taxTotal || 0) : undefined,
-    personalTax: type === 'expense' ? Number(x.personalTax || 0) : undefined,
-    taxRates: Array.isArray(x.taxRates) ? x.taxRates : [],
-    subtotal: type === 'expense' ? Number(x.subtotal ?? Math.max(0, amount - Number(x.personalTax || 0))) : undefined,
-    receiptSubtotal: type === 'expense' ? Number(x.receiptSubtotal ?? Math.max(0, Number(x.receiptTotal ?? amount) - Number(x.taxTotal || 0))) : undefined,
-    category: String(x.category || (type === 'income' ? 'Other Income' : 'Other')),
-    subcategory: String(x.subcategory || ''),
-    payment: String(x.payment || x.method || 'Other'),
-    notes: String(x.notes || '') + (x.notes ? ' · ' : '') + 'Recovered from legacy local browser storage.',
-    receiptId: null,
-    ocrText: '',
-    created: String(x.created || x.createdAt || new Date().toISOString()),
-    modified: new Date().toISOString()
-  };
-}
-function normalizeRecoveredAccount(x) {
-  if (!x || typeof x !== 'object') return null;
-  const balance = Number(x.balance ?? x.currentBalance ?? x.cashBalance);
-  const name = String(x.name ?? x.accountName ?? x.label ?? '').trim();
-  if (!Number.isFinite(balance) || !name) return null;
-  const hay = `${name} ${x.type || ''}`.toLowerCase();
-  if (/(demo|sample|example|testing)/i.test(hay)) return null;
-  if (!/(cash|bank|saving|wallet|account|current)/i.test(hay)) return null;
-  return { id:String(x.id || `forensic-account-${name}`).replace(/[^a-zA-Z0-9._-]/g,'_').slice(0,120), name, type:String(x.type || (/cash|wallet/i.test(hay)?'Cash':'Bank')), balance, created:String(x.created || new Date().toISOString()), updatedAt:new Date().toISOString() };
-}
-async function readLegacyDb(name) {
-  return new Promise(resolve => {
-    try {
-      const req = indexedDB.open(name);
-      req.onerror = () => resolve([]);
-      req.onsuccess = async () => {
-        const db = req.result, rows = [];
-        const stores = Array.from(db.objectStoreNames || []);
-        for (const storeName of stores) {
-          try {
-            const vals = await new Promise(res => {
-              const q = db.transaction(storeName,'readonly').objectStore(storeName).getAll();
-              q.onsuccess = () => res(q.result || []);
-              q.onerror = () => res([]);
-            });
-            rows.push(...vals);
-          } catch (_) {}
-        }
-        db.close();
-        resolve(rows);
-      };
-    } catch (_) { resolve([]); }
-  });
-}
-async function forensicRecoverLocalData() {
-  const found = [];
-  try {
-    if (indexedDB.databases) {
-      const dbs = await indexedDB.databases();
-      for (const info of dbs || []) {
-        const name = String(info.name || '');
-        if (!name || name === 'expense-vault' || name === 'expense-vault-safety') continue;
-        found.push(...await readLegacyDb(name));
-      }
-    }
-  } catch (_) {}
-  for (const storage of [localStorage, sessionStorage]) {
-    try {
-      for (let i=0;i<storage.length;i++) {
-        const key=storage.key(i), raw=storage.getItem(key);
-        if (!raw || raw.length < 2) continue;
-        try { found.push(JSON.parse(raw)); } catch (_) {}
-      }
-    } catch (_) {}
-  }
-  const objects = [];
-  found.forEach(v => recoveryObjects(v, objects));
-  const currentKeys = new Set(TX.map(t => `${t.type||'expense'}|${t.date}|${Number(t.amount).toFixed(2)}|${String(t.merchant).toLowerCase()}`));
-  let restoredTx = 0;
-  for (const obj of objects) {
-    const t = normalizeRecoveredTransaction(obj);
-    if (!t) continue;
-    const key = `${t.type}|${t.date}|${Number(t.amount).toFixed(2)}|${t.merchant.toLowerCase()}`;
-    if (currentKeys.has(key)) continue;
-    await DB.put('transactions', t);
-    currentKeys.add(key);
-    restoredTx++;
-  }
-  const accountKeys = new Set(ACCOUNTS.map(a => `${a.name.toLowerCase()}|${Number(a.balance).toFixed(2)}`));
-  let restoredAccounts = 0;
-  for (const obj of objects) {
-    const a = normalizeRecoveredAccount(obj);
-    if (!a) continue;
-    const key = `${a.name.toLowerCase()}|${Number(a.balance).toFixed(2)}`;
-    if (accountKeys.has(key)) continue;
-    ACCOUNTS.push(a); accountKeys.add(key); restoredAccounts++;
-  }
-  if (restoredAccounts) await DB.setMeta('accounts', ACCOUNTS);
-  if (restoredTx || restoredAccounts) {
-    await reloadData();
-    recoveryAvailable = false;
-    await writeSafetySnapshot();
-  }
-  return { restoredTx, restoredAccounts };
-}
-
-async function recoverKnownRealDataOnce() {
-  const marker = await SafetyDB.getFlag('recovery-2026-10-01-v1');
-  if (marker) return;
-  const alreadyThere = TX.some(t =>
-    (t.type || 'expense') === 'expense' &&
-    t.date === '2026-10-01' &&
-    Math.abs(Number(t.amount || 0) - 3) < 0.001 &&
-    /digi|top.?up|recharge|phone/i.test(`${t.merchant || ''} ${t.notes || ''}`)
-  );
-  if (!alreadyThere) {
-    const now = new Date().toISOString();
-    await DB.put('transactions', {
-      id: 'recovery-digi-topup-2026-10-01',
-      type: 'expense',
-      date: '2026-10-01',
-      time: '',
-      merchant: 'DIGI phone top-up',
-      amount: 3,
-      receiptTotal: 3,
-      taxTotal: 0,
-      personalTax: 0,
-      taxRates: [],
-      subtotal: 3,
-      receiptSubtotal: 3,
-      category: 'Internet & Phone',
-      subcategory: '',
-      payment: 'Other',
-      notes: 'Recovered after storage incident. Edit the payment method if needed.',
-      receiptId: null,
-      ocrText: '',
-      created: now,
-      modified: now
-    });
-  }
-  await SafetyDB.setFlag('recovery-2026-10-01-v1', true);
-  await reloadData();
 }
 
 async function init() {
   await DB.open();
   await SafetyDB.open();
   await reloadData();
-  await forensicRecoverLocalData();
-  await recoverKnownRealDataOnce();
   await refreshSafetyStatus();
-  recoveryAvailable = TX.length === 0 && safetyStatus.count > 0;
-  if (!safetyStatus.savedAt && TX.length) await writeSafetySnapshot();
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredInstallPrompt = e; if (S.v === 'more' || S.v === 'settings') render(); });
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
   if (matchMedia) matchMedia('(prefers-color-scheme:dark)').addEventListener('change', () => S.theme === 'system' && render());
@@ -331,21 +157,21 @@ const store = {
   all: () => TX,
   get: id => TX.find(t => t.id === id),
   async save(t) {
-    const i = TX.findIndex(x => x.id === t.id);
-    i < 0 ? TX.push(t) : (TX[i] = t);
     await DB.put('transactions', t);
+    await reloadData();
     await writeSafetySnapshot();
   },
   async remove(id) {
     const t = this.get(id);
-    TX = TX.filter(x => x.id !== id);
     await DB.remove('transactions', id);
-    if (t?.receiptId && !TX.some(x => x.receiptId === t.receiptId)) await deleteReceipt(t.receiptId);
+    const remaining = await DB.all('transactions');
+    if (t?.receiptId && !remaining.some(x => x.receiptId === t.receiptId)) await deleteReceipt(t.receiptId);
+    await reloadData();
     await writeSafetySnapshot();
   }
 };
 
-async function saveMeta(key, value) { await DB.setMeta(key, value); await writeSafetySnapshot(); }
+async function saveMeta(key, value) { await DB.setMeta(key, value); await reloadData(); await writeSafetySnapshot(); }
 async function deleteReceipt(id) {
   if (!id) return;
   const u = RECEIPT_URLS.get(id); if (u) URL.revokeObjectURL(u);
@@ -476,7 +302,6 @@ function home() {
   const dv = Array.from({ length: dim }, (_, i) => expenseSum(l.filter(t => +t.date.slice(8) === i + 1)));
   const pct = budget > 0 ? Math.min(100, out / budget * 100) : 0;
   return `<div class="month"><button aria-label="Previous month" onclick="S.mo--;render()">‹</button><h1 style="margin:0;font-size:20px">${monthName(k)}</h1><button aria-label="Next month" ${S.mo >= 0 ? 'disabled style="opacity:.3"' : ''} onclick="S.mo++;render()">›</button></div>
-  ${recoveryAvailable ? `<div class="card recovery-alert"><b>Safety copy available</b><p class="mut">The main database is empty but a previous safety copy contains ${safetyStatus.count} transactions.</p><button class="btn" onclick="restoreSafetySnapshotPrompt()">Review recovery copy</button></div>` : ''}
   <div class="card hero"><div class="row sp"><span>${cur ? 'This month · balance' : 'Monthly balance'}</span><button class="icon-btn hero-search" aria-label="Search" onclick="gsearch()">⌕</button></div>
   <button class="hero-summary" onclick="monthOverview('${k}')" aria-label="Open monthly breakdown">
     <div class="big">${eur(balance)}</div>
@@ -793,6 +618,7 @@ async function saveTx(id) {
     const personalTax = Math.round(taxTotal * shareRatio * 100) / 100;
     const t = { id: id || uid('e'), type: 'expense', date: $('#fd').value || TODAY, time: old?.time || new Date().toTimeString().slice(0, 5), merchant: m, amount: a, receiptTotal, taxTotal, personalTax, taxRates, receiptSubtotal: Math.round(Math.max(0, receiptTotal - taxTotal) * 100) / 100, subtotal: Math.round(Math.max(0, a - personalTax) * 100) / 100, category: $('#fcat').value, subcategory: $('#fsub').value.trim(), payment: $('#fpay').value, notes: $('#fn').value.trim(), receiptId, ocrText: draft?.ocrText || old?.ocrText || '', created: old?.created || now, modified: now };
     await store.save(t);
+    S.mo = monthOffsetForDate(t.date);
     if (draft?.previewUrl) URL.revokeObjectURL(draft.previewUrl);
     const wasScan = !!draft?.scanned; draft = null;
     sheet(`<div style="text-align:center;padding:24px 0"><div style="font-size:54px">✓</div><h2>Expense saved</h2><p>${eur(a)} added to ${esc(t.category)}.</p>${Math.abs(receiptTotal-a) > 0.005 ? `<p class="mut">Receipt total: ${eur(receiptTotal)} · Your share: ${eur(a)}</p>` : ''}</div><button class="btn" onclick="closeSheet();go('${wasScan ? 'home' : S.v === 'tx' ? 'tx' : 'home'}')">Done</button>`);
@@ -831,6 +657,7 @@ async function saveIncome(id) {
     }
     const t = { id: id || uid('i'), type: 'income', date: $('#idate').value || TODAY, time: old?.time || new Date().toTimeString().slice(0, 5), merchant: m, amount: a, category: $('#icat').value, subcategory: '', payment: $('#ipay').value, notes: $('#inotes').value.trim(), receiptId, ocrText: '', created: old?.created || now, modified: now };
     await store.save(t);
+    S.mo = monthOffsetForDate(t.date);
     sheet(`<div style="text-align:center;padding:24px 0"><div style="font-size:54px">✓</div><h2>Income saved</h2><p class="income-amt">+${eur(a)} added as ${esc(t.category)}.</p></div><button class="btn" onclick="closeSheet();go('home')">Done</button>`);
   } catch (e) { const err = $('#ierr'); if (err) err.textContent = 'Could not save this income. ' + (e.message || ''); }
 }
@@ -1012,7 +839,6 @@ async function confirmRestore() {
   await DB.importAll(restorePayload);
   restorePayload = null;
   await reloadData();
-  recoveryAvailable = false;
   await writeSafetySnapshot();
   closeSheet();
   go('home');
@@ -1022,10 +848,9 @@ function resetLocalDataPrompt() {
 }
 async function resetLocalData() {
   if (($('#resetWord')?.value || '').trim().toUpperCase() !== 'DELETE') return toast('Type DELETE to confirm.');
-  await writeSafetySnapshot();
-  await DB.clear('transactions'); await DB.clear('receipts'); await DB.clear('meta');
+  await DB.clear('transactions'); await DB.clear('receipts'); await DB.clear('meta'); await SafetyDB.clear();
   draft = null; S.mo = 0; S.q = ''; S.range = 'all'; S.from = ''; S.to = ''; S.f = { type: '', cat: '', pay: '', min: '', max: '', sort: 'new' }; S.rf = { cat: '', from: '', to: '', min: '', max: '' }; S.rq = '';
-  await reloadData(); closeSheet(); go('home'); toast('Local data erased. Expense Vault is ready for a fresh start.');
+  await reloadData(); await refreshSafetyStatus(); closeSheet(); go('home'); toast('Local data erased. Expense Vault is ready for a fresh start.');
 }
 function exportCsv() {
   const rows = [['ID', 'Type', 'Date', 'Time', 'Merchant / Source', 'My Amount', 'Receipt Total', 'My Subtotal', 'Receipt Tax / VAT', 'My VAT Share', 'Tax rate(s)', 'Category', 'Subcategory', 'Payment / Received via', 'Notes'], ...TX.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(t => [t.id, t.type || 'expense', t.date, t.time, t.merchant, t.amount, t.type === 'income' ? '' : (t.receiptTotal ?? t.amount), t.type === 'income' ? '' : (t.subtotal ?? ''), t.type === 'income' ? '' : (t.taxTotal || ''), t.type === 'income' ? '' : (t.personalTax || ''), t.type === 'income' ? '' : ((t.taxRates || []).join(', ')), t.category, t.subcategory || '', t.payment, t.notes || ''])];

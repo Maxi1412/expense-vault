@@ -13,7 +13,6 @@ let ocrWorker = null;
 let ocrLogger = null;
 let deferredInstallPrompt = null;
 let restorePayload = null;
-const CLEAN_START_MARKER = 'expense-vault-clean-start-2026-09-30-v1';
 
 const TODAY = localDateISO(new Date());
 const S = {
@@ -54,21 +53,51 @@ const catIco = c => `<div class="ico" style="background:${cat(c).color}22" aria-
 const txCatIco = t => `<div class="ico" style="background:${txCat(t).color}22" aria-hidden="true">${txCat(t).icon}</div>`;
 const status = p => p >= 100 ? ['ov', 'Over budget', 'var(--bad)'] : p >= 80 ? ['wn', 'Approaching', 'var(--warn)'] : ['ok', 'On track', 'var(--ok)'];
 
-async function clearTestingDataOnce() {
+let safetyTimer = null;
+let safetyStatus = { savedAt: '', count: 0 };
+
+async function writeSafetySnapshot() {
   try {
-    if (localStorage.getItem(CLEAN_START_MARKER) === 'done') return;
-    await DB.clear('transactions');
-    await DB.clear('receipts');
-    localStorage.setItem(CLEAN_START_MARKER, 'done');
+    const payload = await DB.exportAll();
+    await SafetyDB.save(payload);
+    safetyStatus = { savedAt: new Date().toISOString(), count: payload.transactions.length };
   } catch (e) {
-    console.error('Could not clear testing data automatically', e);
+    console.error('Safety snapshot failed', e);
   }
+}
+function scheduleSafetySnapshot() {
+  clearTimeout(safetyTimer);
+  safetyTimer = setTimeout(() => writeSafetySnapshot(), 250);
+}
+async function refreshSafetyStatus() {
+  try {
+    const snap = await SafetyDB.get();
+    safetyStatus = snap ? { savedAt: snap.savedAt || '', count: snap.payload?.transactions?.length || 0 } : { savedAt: '', count: 0 };
+  } catch (_) {
+    safetyStatus = { savedAt: '', count: 0 };
+  }
+}
+async function restoreSafetySnapshotPrompt() {
+  const snap = await SafetyDB.get();
+  if (!snap?.payload) return toast('No safety recovery copy is available yet.');
+  sheet(`<h2>Restore safety copy?</h2><div class="card"><b>${snap.payload.transactions?.length || 0} transactions</b><div class="mut">${snap.payload.receipts?.length || 0} attachments</div><div class="mut">Saved ${new Date(snap.savedAt).toLocaleString()}</div></div><p class="mut">This replaces the current main database with the last automatically saved good copy.</p><div class="btns"><button class="btn ghost" onclick="closeSheet()">Cancel</button><button class="btn" onclick="restoreSafetySnapshot()">Restore</button></div>`);
+}
+async function restoreSafetySnapshot() {
+  const snap = await SafetyDB.get();
+  if (!snap?.payload) return toast('No safety recovery copy is available.');
+  await DB.importAll(snap.payload);
+  await reloadData();
+  await writeSafetySnapshot();
+  closeSheet();
+  go('home');
 }
 
 async function init() {
   await DB.open();
-  await clearTestingDataOnce();
+  await SafetyDB.open();
   await reloadData();
+  await refreshSafetyStatus();
+  if (!safetyStatus.savedAt && TX.length) await writeSafetySnapshot();
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredInstallPrompt = e; if (S.v === 'more' || S.v === 'settings') render(); });
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
   if (matchMedia) matchMedia('(prefers-color-scheme:dark)').addEventListener('change', () => S.theme === 'system' && render());
@@ -114,20 +143,23 @@ const store = {
     const i = TX.findIndex(x => x.id === t.id);
     i < 0 ? TX.push(t) : (TX[i] = t);
     await DB.put('transactions', t);
+    scheduleSafetySnapshot();
   },
   async remove(id) {
     const t = this.get(id);
     TX = TX.filter(x => x.id !== id);
     await DB.remove('transactions', id);
     if (t?.receiptId && !TX.some(x => x.receiptId === t.receiptId)) await deleteReceipt(t.receiptId);
+    scheduleSafetySnapshot();
   }
 };
 
-async function saveMeta(key, value) { await DB.setMeta(key, value); }
+async function saveMeta(key, value) { await DB.setMeta(key, value); scheduleSafetySnapshot(); }
 async function deleteReceipt(id) {
   if (!id) return;
   const u = RECEIPT_URLS.get(id); if (u) URL.revokeObjectURL(u);
   RECEIPT_URLS.delete(id); RECEIPTS.delete(id); await DB.remove('receipts', id);
+  scheduleSafetySnapshot();
 }
 function receiptUrl(id) {
   if (!id) return '';
@@ -720,7 +752,8 @@ function receiptFilterSheet() {
 /* ---------- backup / export ---------- */
 function backup() {
   return back('Export & Backup') + `<div class="card" style="text-align:center"><div style="font-size:44px">🔒</div><h2>Your records stay on this device</h2><p class="mut">Expense data and receipt images are stored in your browser's local database. Create backups regularly so clearing browser data or losing the device cannot erase your records.</p><div id="storageInfo" class="mut">${storageEstimateText()}</div></div>
-  <button class="btn" onclick="createBackup()" style="margin-bottom:10px">💾 Create Full Backup</button><button class="btn sec" onclick="restoreBackupPick()" style="margin-bottom:10px">♻️ Restore Backup</button><button class="btn ghost" onclick="requestPersistentStorage()" style="margin-bottom:10px">Protect Local Storage</button>
+  <button class="btn" onclick="createBackup()" style="margin-bottom:10px">💾 Create Full Backup</button><button class="btn sec" onclick="restoreBackupPick()" style="margin-bottom:10px">♻️ Restore Backup</button><button class="btn ghost" onclick="restoreSafetySnapshotPrompt()" style="margin-bottom:10px">🛟 Restore Last Safety Copy</button><button class="btn ghost" onclick="requestPersistentStorage()" style="margin-bottom:10px">Protect Local Storage</button>
+  <div class="card"><h2>Automatic safety copy</h2><p class="mut">${safetyStatus.savedAt ? `Last saved ${new Date(safetyStatus.savedAt).toLocaleString()} · ${safetyStatus.count} transactions` : 'A safety copy will be created automatically after your next saved entry.'}</p><p class="mut">This is stored separately from the main Expense Vault database on this device.</p></div>
   <div class="card" style="margin-top:14px"><h2>Export transactions</h2><div class="btns export-btns"><button class="btn sec" onclick="exportCsv()">CSV</button><button class="btn sec" onclick="exportExcel()">Excel</button></div></div>
   <div class="card" style="margin-top:14px"><h2>Reset</h2><p class="mut">Permanently remove all local transactions, receipt images, budgets and personal settings from this installation.</p><button class="btn del" onclick="resetLocalDataPrompt()">Erase all local data</button></div>`;
 }
@@ -763,6 +796,7 @@ function resetLocalDataPrompt() {
 }
 async function resetLocalData() {
   if (($('#resetWord')?.value || '').trim().toUpperCase() !== 'DELETE') return toast('Type DELETE to confirm.');
+  await writeSafetySnapshot();
   await DB.clear('transactions'); await DB.clear('receipts'); await DB.clear('meta');
   draft = null; S.mo = 0; S.q = ''; S.range = 'all'; S.from = ''; S.to = ''; S.f = { type: '', cat: '', pay: '', min: '', max: '', sort: 'new' }; S.rf = { cat: '', from: '', to: '', min: '', max: '' }; S.rq = '';
   await reloadData(); closeSheet(); go('home'); toast('Local data erased. Expense Vault is ready for a fresh start.');

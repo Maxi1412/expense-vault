@@ -90,6 +90,22 @@ async function restoreSafetySnapshot() {
   closeSheet();
   go('home');
 }
+async function safetyHistory() {
+  const rows = await SafetyDB.list();
+  if (!rows.length) return toast('No recovery history is available yet.');
+  sheet(`<h2>Recovery history</h2><p class="mut">Expense Vault keeps up to 20 recent safety snapshots on this device.</p><div class="card">${rows.slice(0,20).map(x => `<button class="item" onclick="restoreSafetyHistory('${jsarg(x.key)}')"><div class="grow"><b>${new Date(x.savedAt).toLocaleString()}</b><div class="mut">${x.payload?.transactions?.length || 0} transactions · ${x.payload?.receipts?.length || 0} attachments</div></div>›</button>`).join('')}</div>`, true);
+}
+async function restoreSafetyHistory(key) {
+  const snap = await SafetyDB.getSnapshot(key);
+  if (!snap?.payload) return toast('That recovery snapshot is no longer available.');
+  await writeSafetySnapshot();
+  await DB.importAll(snap.payload);
+  await reloadData();
+  recoveryAvailable = false;
+  await writeSafetySnapshot();
+  closeSheet();
+  go('home');
+}
 
 async function recoverKnownRealDataOnce() {
   const marker = await SafetyDB.getFlag('recovery-2026-10-01-v1');
@@ -820,7 +836,7 @@ function receiptFilterSheet() {
 /* ---------- backup / export ---------- */
 function backup() {
   return back('Export & Backup') + `<div class="card" style="text-align:center"><div style="font-size:44px">🔒</div><h2>Your records stay on this device</h2><p class="mut">Expense data and receipt images are stored in your browser's local database. Create backups regularly so clearing browser data or losing the device cannot erase your records.</p><div id="storageInfo" class="mut">${storageEstimateText()}</div></div>
-  <button class="btn" onclick="createBackup()" style="margin-bottom:10px">💾 Create Full Backup</button><button class="btn sec" onclick="restoreBackupPick()" style="margin-bottom:10px">♻️ Restore Backup</button><button class="btn ghost" onclick="restoreSafetySnapshotPrompt()" style="margin-bottom:10px">🛟 Restore Last Safety Copy</button><button class="btn ghost" onclick="requestPersistentStorage()" style="margin-bottom:10px">Protect Local Storage</button>
+  <button class="btn" onclick="createBackup()" style="margin-bottom:10px">💾 Create Full Backup</button><button class="btn sec" onclick="restoreBackupPick()" style="margin-bottom:10px">♻️ Restore Backup</button><button class="btn ghost" onclick="restoreSafetySnapshotPrompt()" style="margin-bottom:10px">🛟 Restore Last Safety Copy</button><button class="btn ghost" onclick="safetyHistory()" style="margin-bottom:10px">🕘 Recovery History</button><button class="btn ghost" onclick="requestPersistentStorage()" style="margin-bottom:10px">Protect Local Storage</button>
   <div class="card"><h2>Automatic safety copy</h2><p class="mut">${safetyStatus.savedAt ? `Last saved ${new Date(safetyStatus.savedAt).toLocaleString()} · ${safetyStatus.count} transactions` : 'A safety copy will be created automatically after your next saved entry.'}</p><p class="mut">This is stored separately from the main Expense Vault database on this device.</p></div>
   <div class="card" style="margin-top:14px"><h2>Export transactions</h2><div class="btns export-btns"><button class="btn sec" onclick="exportCsv()">CSV</button><button class="btn sec" onclick="exportExcel()">Excel</button></div></div>
   <div class="card" style="margin-top:14px"><h2>Reset</h2><p class="mut">Permanently remove all local transactions, receipt images, budgets and personal settings from this installation.</p><button class="btn del" onclick="resetLocalDataPrompt()">Erase all local data</button></div>`;

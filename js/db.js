@@ -159,5 +159,24 @@ const SafetyDB = (() => {
     });
   }
 
-  return { open, save, get, clear };
+  async function setFlag(name, value = true) {
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('snapshots', 'readwrite');
+      tx.objectStore('snapshots').put({ key: 'flag:' + name, value });
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async function getFlag(name) {
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      const req = db.transaction('snapshots', 'readonly').objectStore('snapshots').get('flag:' + name);
+      req.onsuccess = () => resolve(req.result?.value ?? false);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  return { open, save, get, clear, setFlag, getFlag };
 })();

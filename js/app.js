@@ -41,6 +41,14 @@ const expenses = l => l.filter(t => (t.type || 'expense') === 'expense');
 const incomes = l => l.filter(t => t.type === 'income');
 const expenseSum = l => sum(expenses(l));
 const incomeSum = l => sum(incomes(l));
+const fundFromPayment = payment => String(payment || '').toLowerCase() === 'cash' ? 'cash' : 'card';
+const fundOf = t => t?.fund === 'cash' || t?.fund === 'card' ? t.fund : fundFromPayment(t?.payment);
+const fundLabel = fund => fund === 'cash' ? 'Cash' : 'Bank / Card';
+const fundBalance = (fund, list = TX) => list.filter(t => fundOf(t) === fund).reduce((total, t) => total + ((t.type === 'income' ? 1 : -1) * Number(t.amount || 0)), 0);
+function syncFundFromPayment(payId, fundId) {
+  const pay = $('#' + payId), fund = $('#' + fundId);
+  if (pay && fund) fund.value = fundFromPayment(pay.value);
+}
 const eur = n => new Intl.NumberFormat('en-IE', { style: 'currency', currency: PROFILE.currency || 'EUR' }).format(Number(n || 0));
 const cat = n => CATS.find(c => c.name === n) || CATS.find(c => c.name === 'Other') || { name: n || 'Other', icon: '📦', color: '#8b8f98' };
 const incomeCat = n => INCOME_CATS.find(c => c.name === n) || INCOME_CATS.find(c => c.name === 'Other Income') || { name: n || 'Other Income', icon: '＋', color: '#1f9d63' };
@@ -175,57 +183,6 @@ async function refreshSafetyStatus() {
   }
 }
 
-async function recoverOctoberIncidentOnce() {
-  try {
-    if (await SafetyDB.getFlag('incident-recovery-2026-10-01-v1')) return false;
-    const current = await DB.exportAll();
-    const rows = await SafetyDB.list();
-    const candidates = rows.filter(x => {
-      const tx = x.payload?.transactions || [];
-      if (String(x.savedAt || '') < '2026-10-01T11:45:00Z') return false;
-      if (tx.length <= current.transactions.length) return false;
-      return !tx.some(t => /demo|sample|test transaction/i.test(`${t.merchant || ''} ${t.notes || ''}`));
-    }).sort((a,b) => {
-      const dc = (b.payload?.transactions?.length || 0) - (a.payload?.transactions?.length || 0);
-      return dc || String(b.savedAt).localeCompare(String(a.savedAt));
-    });
-    const best = candidates[0];
-    if (best?.payload) {
-      await DB.importAll(best.payload);
-      await SafetyDB.setFlag('incident-recovery-2026-10-01-v1', true);
-      await JournalDB.save(best.payload, 'incident-recovery');
-      await writeOpfsBackup(best.payload);
-      return true;
-    }
-    await SafetyDB.setFlag('incident-recovery-2026-10-01-v1', true);
-  } catch (e) {
-    console.warn('Incident recovery unavailable', e);
-  }
-  return false;
-}
-
-async function restoreLatestRedundantBackupIfNeeded() {
-  const current = await DB.exportAll();
-  if (current.transactions.length) return false;
-
-  const j = await JournalDB.latest().catch(() => null);
-  if (j?.payload?.transactions?.length) {
-    await DB.importAll(j.payload);
-    return true;
-  }
-  const s = await SafetyDB.get().catch(() => null);
-  if (s?.payload?.transactions?.length) {
-    await DB.importAll(s.payload);
-    return true;
-  }
-  const o = await readOpfsBackup();
-  if (o?.transactions?.length) {
-    await DB.importAll(o);
-    return true;
-  }
-  return false;
-}
-
 async function restoreSafetySnapshotPrompt() {
   const snap = await SafetyDB.get();
   if (!snap?.payload) return toast('No safety copy is available yet.');
@@ -257,8 +214,6 @@ async function init() {
   await JournalDB.open();
   await persistLocalStorage();
   await reloadData();
-  await recoverOctoberIncidentOnce();
-  await restoreLatestRedundantBackupIfNeeded();
   await reloadData();
   await refreshSafetyStatus();
   if (!(await JournalDB.latest().catch(() => null))) await captureRedundantState('bootstrap');
@@ -274,7 +229,10 @@ async function reloadData() {
   INCOME_CATS = await DB.getMeta('incomeCategories', structuredClone(INCOME_CATS_DEFAULT));
   const legacy = TX.filter(t => !t.type);
   legacy.forEach(t => t.type = 'expense');
-  if (legacy.length) await Promise.all(legacy.map(t => DB.put('transactions', t)));
+  const missingFund = TX.filter(t => t.fund !== 'cash' && t.fund !== 'card');
+  missingFund.forEach(t => t.fund = fundFromPayment(t.payment));
+  const changedLegacy = [...new Map([...legacy, ...missingFund].map(t => [t.id, t])).values()];
+  if (changedLegacy.length) await Promise.all(changedLegacy.map(t => DB.put('transactions', t)));
   BUDGETS = await DB.getMeta('budgets', structuredClone(BUDGETS_DEFAULT));
   ACCOUNTS = await DB.getMeta('accounts', structuredClone(ACCOUNTS_DEFAULT));
   PAYMENTS = await DB.getMeta('payments', structuredClone(PAYMENTS_DEFAULT));
@@ -353,6 +311,14 @@ function receiptUrl(id) {
   if (RECEIPT_URLS.has(id)) return RECEIPT_URLS.get(id);
   const r = RECEIPTS.get(id); if (!r?.blob) return '';
   const u = URL.createObjectURL(r.blob); RECEIPT_URLS.set(id, u); return u;
+}
+
+function fundActivity(fund) {
+  const l = TX.filter(t => fundOf(t) === fund).sort((a,b) => b.date.localeCompare(a.date) || String(b.time || '').localeCompare(String(a.time || '')));
+  const bal = fundBalance(fund, l);
+  sheet(`<div class="detail-head"><div><h2 style="margin:0">${fundLabel(fund)}</h2><div class="mut">Current available balance</div></div></div>
+    <div class="card detail-summary"><div><span class="mut">Available</span><div class="detail-total ${bal >= 0 ? 'income-amt' : 'up'}">${eur(bal)}</div></div><div class="mut">${l.length} transaction${l.length===1?'':'s'}</div></div>
+    <div class="card detail-list">${l.map(txRow).join('') || empty('💶','No activity yet','Transactions assigned to this money location will appear here.')}</div>`, true);
 }
 
 /* ---------- charts ---------- */
@@ -480,7 +446,13 @@ function home() {
     ${budget > 0 ? `<div class="bar" style="margin:12px 0 8px"><i style="width:${pct}%"></i></div><div class="row sp"><span>${rem >= 0 ? eur(rem) + ' budget remaining' : eur(-rem) + ' over budget'}</span><span>of ${eur(budget)}</span></div>` : '<div style="margin-top:10px">No monthly budget set</div>'}
     <span class="hero-breakdown-label">View monthly breakdown ›</span>
   </button></div>
-  ${ACCOUNTS.length ? `<button class="card funds-card" onclick="go('accounts')"><div><span class="mut">Available funds</span><b>${eur(ACCOUNTS.reduce((a,x)=>a+Number(x.balance||0),0))}</b></div><span class="tap-more">Cash & accounts ›</span></button>` : ''}
+  <div class="card money-location-card">
+    <div class="row sp money-location-head"><h2>Available money</h2><span class="mut">All recorded transactions</span></div>
+    <div class="money-location-grid">
+      <button onclick="fundActivity('card')"><span class="money-loc-icon">💳</span><span class="mut">Bank / Card</span><b>${eur(fundBalance('card'))}</b><span class="tap-more">View activity ›</span></button>
+      <button onclick="fundActivity('cash')"><span class="money-loc-icon">💶</span><span class="mut">Cash</span><b>${eur(fundBalance('cash'))}</b><span class="tap-more">View activity ›</span></button>
+    </div>
+  </div>
   <div class="grid2">${cur ? `<button class="card stat tap-card" onclick="drillPeriod('expense',TODAY,TODAY,'Today’s expenses')"><span class="mut">Today spent</span><b>${eur(expenseSum(TX.filter(t => t.date === TODAY)))}</b><span class="tap-more">View details ›</span></button><button class="card stat tap-card" onclick="drillPeriod('expense',add(TODAY,-6),TODAY,'This week’s expenses')"><span class="mut">This week spent</span><b>${eur(expenseSum(wk))}</b><span class="tap-more">View details ›</span></button>` : `<button class="card stat tap-card" onclick="drillMonth('expense','${k}','Expenses · ${monthName(k)}')"><span class="mut">Average per day</span><b>${eur(out / Math.max(1, dim))}</b><span class="tap-more">View details ›</span></button><button class="card stat tap-card" onclick="drillMonth('all','${k}','Activity · ${monthName(k)}')"><span class="mut">Transactions</span><b>${l.length}</b><span class="tap-more">View activity ›</span></button>`}
   <button class="card stat tap-card" onclick="drillMonth('income','${k}','Income · ${monthName(k)}')"><span class="mut">Income this month</span><b class="income-amt">${eur(inc)}</b><span class="tap-more">View details ›</span></button><button class="card stat tap-card" onclick="drillMonth('expense','${k}','Expenses · ${monthName(k)}')"><span class="mut">Monthly spending</span><b>${eur(out)}</b><span class="tap-more">View details ›</span></button></div>
   <button class="card daily-spending-card" style="margin-top:14px" onclick="dailySpendingBreakdown('${k}')" aria-label="Open daily spending breakdown"><div class="row sp"><h2>Daily spending</h2><span class="tap-more" style="margin:0">View days ›</span></div>${bars(dv, dv.map((_, i) => (i + 1) % 5 === 0 ? i + 1 : ''))}</button>
@@ -501,7 +473,7 @@ function filtered() {
     if (f.pay && t.payment !== f.pay) return false;
     if (f.min !== '' && t.amount < +f.min) return false;
     if (f.max !== '' && t.amount > +f.max) return false;
-    return !q || `${t.merchant} ${t.category} ${t.subcategory || ''} ${t.notes || ''} ${t.payment}`.toLowerCase().includes(q);
+    return !q || `${t.merchant} ${t.category} ${t.subcategory || ''} ${t.notes || ''} ${t.payment} ${fundLabel(fundOf(t))}`.toLowerCase().includes(q);
   });
   const so = { new: (a, b) => b.date.localeCompare(a.date) || b.modified.localeCompare(a.modified), old: (a, b) => a.date.localeCompare(b.date), high: (a, b) => b.amount - a.amount, low: (a, b) => a.amount - b.amount };
   return l.sort(so[f.sort]);
@@ -531,7 +503,7 @@ function txDetail(id) {
   const t = store.get(id); if (!t) return;
   const url = receiptUrl(t.receiptId), isIncome = t.type === 'income';
   sheet(`<div class="row">${txCatIco(t)}<div class="grow"><h2 style="margin:0">${esc(t.merchant)}</h2><span class="mut">${isIncome ? 'Income · ' : ''}${esc(t.category)}${t.subcategory ? ' · ' + esc(t.subcategory) : ''}</span></div></div><div class="big ${isIncome ? 'income-amt' : ''}" style="margin:12px 0">${isIncome ? '+' : ''}${eur(t.amount)}</div>
-  <div class="card">${[['Type', isIncome ? 'Income' : 'Expense'], ['Date', fdl(t.date) + ' · ' + (t.time || '')], [isIncome ? 'Received via' : 'Payment', t.payment], ...(isIncome ? [] : (Number(t.receiptTotal || t.amount) !== Number(t.amount) ? [['Receipt total', eur(t.receiptTotal || t.amount)], ['Your share', eur(t.amount)]] : [])), ...(isIncome || !(Number(t.taxTotal || 0) > 0) ? [] : [['Receipt Tax / VAT', eur(t.taxTotal)], ...(Number(t.receiptTotal || t.amount) !== Number(t.amount) ? [['Your VAT share', eur(t.personalTax ?? (Number(t.taxTotal || 0) * Number(t.amount || 0) / Math.max(Number(t.receiptTotal || t.amount), 0.01)))]] : []), ['Tax rate', (t.taxRates || []).length ? t.taxRates.join(', ') + '%' : '—']]), ['Notes', t.notes || '—'], ['Created', fd(t.created.slice(0, 10))], ['Last edited', fd(t.modified.slice(0, 10))]].map(([a, b]) => `<div class="row sp detail-row"><span class="mut">${a}</span><span>${esc(b)}</span></div>`).join('')}</div>
+  <div class="card">${[['Type', isIncome ? 'Income' : 'Expense'], ['Date', fdl(t.date) + ' · ' + (t.time || '')], [isIncome ? 'Received via' : 'Payment', t.payment], ['Money location', fundLabel(fundOf(t))], ...(isIncome ? [] : (Number(t.receiptTotal || t.amount) !== Number(t.amount) ? [['Receipt total', eur(t.receiptTotal || t.amount)], ['Your share', eur(t.amount)]] : [])), ...(isIncome || !(Number(t.taxTotal || 0) > 0) ? [] : [['Receipt Tax / VAT', eur(t.taxTotal)], ...(Number(t.receiptTotal || t.amount) !== Number(t.amount) ? [['Your VAT share', eur(t.personalTax ?? (Number(t.taxTotal || 0) * Number(t.amount || 0) / Math.max(Number(t.receiptTotal || t.amount), 0.01)))]] : []), ['Tax rate', (t.taxRates || []).length ? t.taxRates.join(', ') + '%' : '—']]), ['Notes', t.notes || '—'], ['Created', fd(t.created.slice(0, 10))], ['Last edited', fd(t.modified.slice(0, 10))]].map(([a, b]) => `<div class="row sp detail-row"><span class="mut">${a}</span><span>${esc(b)}</span></div>`).join('')}</div>
   ${url ? `<img class="rcp" alt="Attached document" src="${url}" style="max-height:220px;object-fit:contain;margin-bottom:10px">` : ''}
   <div class="btns" style="flex-wrap:wrap">${url ? `<button class="btn sec" onclick="rcpView('${id}')">View attachment</button>` : ''}<button class="btn sec" onclick="txForm('${id}')">Edit</button><button class="btn del" onclick="confirmDel('${id}')">Delete</button></div>`, true);
 }
@@ -756,7 +728,8 @@ function setMyShare(fraction) {
 }
 function txForm(id, d) {
   if (id && store.get(id)?.type === 'income') return incomeForm(id, store.get(id));
-  const t = id ? store.get(id) : d || { date: TODAY, payment: 'Debit Card', category: 'Groceries', notes: '', subcategory: '' };
+  const t = id ? store.get(id) : d || { date: TODAY, payment: 'Debit Card', fund: 'card', category: 'Groceries', notes: '', subcategory: '' };
+  t.fund = fundOf(t);
   const o = (a, v) => a.map(x => `<option value="${esc(x)}" ${x === v ? 'selected' : ''}>${esc(x)}</option>`).join('');
   const existingUrl = id && t.receiptId ? receiptUrl(t.receiptId) : '';
   sheet(`<h2>${id ? 'Edit expense' : d?.scanned ? 'Review & Save' : 'Manual expense'}</h2>${d?.scanned ? '<div class="tag ok scan-tag">Detected locally from receipt — please check every field</div>' : ''}
@@ -768,7 +741,8 @@ function txForm(id, d) {
   </div>
   <div class="grid2"><div><label for="ftax">Receipt Tax / VAT (optional)</label><input id="ftax" type="number" inputmode="decimal" step="0.01" min="0" value="${Number(t.taxTotal || 0) ? t.taxTotal : ''}" placeholder="Auto-detected"></div><div><label>Tax rate</label><input value="${(t.taxRates || []).length ? esc(t.taxRates.join(', ') + '%') : ''}" placeholder="Auto-detected" readonly></div></div>
   <label for="fm">Merchant / Payee</label><input id="fm" value="${esc(t.merchant || '')}" placeholder="e.g. Mercadona">
-  <div class="grid2"><div><label for="fd">Date</label><input id="fd" type="date" value="${t.date || TODAY}"></div><div><label for="fpay">Payment</label><select id="fpay">${o(PAYMENTS, t.payment)}</select></div></div>
+  <div class="grid2"><div><label for="fd">Date</label><input id="fd" type="date" value="${t.date || TODAY}"></div><div><label for="fpay">Payment</label><select id="fpay" onchange="syncFundFromPayment('fpay','ffund')">${o(PAYMENTS, t.payment)}</select></div></div>
+  <label for="ffund">Paid from</label><select id="ffund"><option value="card" ${t.fund==='card'?'selected':''}>Bank / Card</option><option value="cash" ${t.fund==='cash'?'selected':''}>Cash</option></select>
   <label for="fcat">Category</label><select id="fcat">${o(CATS.map(c => c.name), t.category)}</select>
   <label for="fsub">Subcategory (optional)</label><input id="fsub" value="${esc(t.subcategory || '')}">
   <label for="fn">Notes</label><textarea id="fn" rows="2">${esc(t.notes || '')}</textarea>
@@ -796,7 +770,7 @@ async function saveTx(id) {
     const taxRates = draft?.taxRates || old?.taxRates || [];
     const shareRatio = receiptTotal > 0 ? Math.max(0, Math.min(1, a / receiptTotal)) : 1;
     const personalTax = Math.round(taxTotal * shareRatio * 100) / 100;
-    const t = { id: id || uid('e'), type: 'expense', date: $('#fd').value || TODAY, time: old?.time || new Date().toTimeString().slice(0, 5), merchant: m, amount: a, receiptTotal, taxTotal, personalTax, taxRates, receiptSubtotal: Math.round(Math.max(0, receiptTotal - taxTotal) * 100) / 100, subtotal: Math.round(Math.max(0, a - personalTax) * 100) / 100, category: $('#fcat').value, subcategory: $('#fsub').value.trim(), payment: $('#fpay').value, notes: $('#fn').value.trim(), receiptId, ocrText: draft?.ocrText || old?.ocrText || '', created: old?.created || now, modified: now };
+    const t = { id: id || uid('e'), type: 'expense', date: $('#fd').value || TODAY, time: old?.time || new Date().toTimeString().slice(0, 5), merchant: m, amount: a, receiptTotal, taxTotal, personalTax, taxRates, receiptSubtotal: Math.round(Math.max(0, receiptTotal - taxTotal) * 100) / 100, subtotal: Math.round(Math.max(0, a - personalTax) * 100) / 100, category: $('#fcat').value, subcategory: $('#fsub').value.trim(), payment: $('#fpay').value, fund: $('#ffund').value, notes: $('#fn').value.trim(), receiptId, ocrText: draft?.ocrText || old?.ocrText || '', created: old?.created || now, modified: now };
     await store.save(t);
     if (receiptId) {
       const rr = await DB.get('receipts', receiptId);
@@ -812,14 +786,16 @@ async function saveTx(id) {
 
 /* ---------- income form ---------- */
 function incomeForm(id, d) {
-  const t = id ? store.get(id) : d || { date: TODAY, payment: 'Bank Transfer', category: 'Salary', notes: '' };
+  const t = id ? store.get(id) : d || { date: TODAY, payment: 'Bank Transfer', fund: 'card', category: 'Salary', notes: '' };
+  t.fund = fundOf(t);
   const o = (a, v) => a.map(x => `<option value="${esc(x)}" ${x === v ? 'selected' : ''}>${esc(x)}</option>`).join('');
   const existingUrl = id && t.receiptId ? receiptUrl(t.receiptId) : '';
   sheet(`<h2>${id ? 'Edit income' : 'Add income'}</h2>
   ${existingUrl ? `<img class="rcp receipt-mini" alt="Income attachment" src="${existingUrl}">` : ''}
   <label for="ia">Amount received</label><input id="ia" class="amt-in" type="number" inputmode="decimal" step="0.01" placeholder="0.00" value="${t.amount ?? ''}">
   <label for="im">Source / Payer</label><input id="im" value="${esc(t.merchant || '')}" placeholder="e.g. Salary, Restaurant tips, Private client">
-  <div class="grid2"><div><label for="idate">Date received</label><input id="idate" type="date" value="${t.date || TODAY}"></div><div><label for="ipay">Received via</label><select id="ipay">${o(PAYMENTS, t.payment)}</select></div></div>
+  <div class="grid2"><div><label for="idate">Date received</label><input id="idate" type="date" value="${t.date || TODAY}"></div><div><label for="ipay">Received via</label><select id="ipay" onchange="syncFundFromPayment('ipay','ifund')">${o(PAYMENTS, t.payment)}</select></div></div>
+  <label for="ifund">Money available as</label><select id="ifund"><option value="card" ${t.fund==='card'?'selected':''}>Bank / Card</option><option value="cash" ${t.fund==='cash'?'selected':''}>Cash</option></select>
   <label for="icat">Income category</label><select id="icat">${o(INCOME_CATS.map(c => c.name), t.category)}</select>
   <label for="inotes">Notes</label><textarea id="inotes" rows="2">${esc(t.notes || '')}</textarea>
   ${id && t.receiptId ? `<label for="iproof">Replace attachment (optional)</label><input id="iproof" type="file" accept="image/*"><label class="check"><input id="iremove" type="checkbox"> Remove current attachment</label>` : '<label for="iproof">Payslip / proof image (optional)</label><input id="iproof" type="file" accept="image/*" capture="environment">'}
@@ -839,7 +815,7 @@ async function saveIncome(id) {
       const row = { id: receiptId, blob: newBlob, name: $('#iproof').files[0].name || `income-${$('#idate').value || TODAY}.jpg`, type: newBlob.type || 'image/jpeg', size: newBlob.size, created: now };
       await DB.put('receipts', row); RECEIPTS.set(receiptId, row);
     }
-    const t = { id: id || uid('i'), type: 'income', date: $('#idate').value || TODAY, time: old?.time || new Date().toTimeString().slice(0, 5), merchant: m, amount: a, category: $('#icat').value, subcategory: '', payment: $('#ipay').value, notes: $('#inotes').value.trim(), receiptId, ocrText: '', created: old?.created || now, modified: now };
+    const t = { id: id || uid('i'), type: 'income', date: $('#idate').value || TODAY, time: old?.time || new Date().toTimeString().slice(0, 5), merchant: m, amount: a, category: $('#icat').value, subcategory: '', payment: $('#ipay').value, fund: $('#ifund').value, notes: $('#inotes').value.trim(), receiptId, ocrText: '', created: old?.created || now, modified: now };
     await store.save(t);
     S.mo = monthOffsetForDate(t.date);
     sheet(`<div style="text-align:center;padding:24px 0"><div style="font-size:54px">✓</div><h2>Income saved</h2><p class="income-amt">+${eur(a)} added as ${esc(t.category)}.</p></div><button class="btn" onclick="closeSheet();go('home')">Done</button>`);
@@ -879,7 +855,7 @@ function analytics() {
 
 /* ---------- more / budgets / categories ---------- */
 function more() {
-  const it = [['accounts', '💳', 'Accounts & Cash'], ['budgets', '🎯', 'Budgets'], ['receipts', '🧾', 'Receipts'], ['cats', '🏷️', 'Categories'], ['backup', '💾', 'Export & Backup'], ['settings', '⚙️', 'Settings'], ['profile', '👤', 'Profile']];
+  const it = [['budgets', '🎯', 'Budgets'], ['receipts', '🧾', 'Receipts'], ['cats', '🏷️', 'Categories'], ['backup', '💾', 'Export & Backup'], ['settings', '⚙️', 'Settings'], ['profile', '👤', 'Profile']];
   return `<h1>More</h1>${deferredInstallPrompt ? '<button class="btn install-btn" onclick="installApp()">Install Expense Vault</button>' : ''}<div class="card">${it.map(([k, i, n]) => `<button class="item" onclick="go('${k}')"><span class="ico" style="background:var(--acc2)">${i}</span><b class="grow">${n}</b>›</button>`).join('')}</div>`;
 }
 async function installApp() { if (!deferredInstallPrompt) return; deferredInstallPrompt.prompt(); await deferredInstallPrompt.userChoice; deferredInstallPrompt = null; render(); }
@@ -1037,13 +1013,13 @@ async function resetLocalData() {
   await reloadData(); await refreshSafetyStatus(); closeSheet(); go('home'); toast('Local data erased. Expense Vault is ready for a fresh start.');
 }
 function exportCsv() {
-  const rows = [['ID', 'Type', 'Date', 'Time', 'Merchant / Source', 'My Amount', 'Receipt Total', 'My Subtotal', 'Receipt Tax / VAT', 'My VAT Share', 'Tax rate(s)', 'Category', 'Subcategory', 'Payment / Received via', 'Notes'], ...TX.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(t => [t.id, t.type || 'expense', t.date, t.time, t.merchant, t.amount, t.type === 'income' ? '' : (t.receiptTotal ?? t.amount), t.type === 'income' ? '' : (t.subtotal ?? ''), t.type === 'income' ? '' : (t.taxTotal || ''), t.type === 'income' ? '' : (t.personalTax || ''), t.type === 'income' ? '' : ((t.taxRates || []).join(', ')), t.category, t.subcategory || '', t.payment, t.notes || ''])];
+  const rows = [['ID', 'Type', 'Date', 'Time', 'Merchant / Source', 'My Amount', 'Receipt Total', 'My Subtotal', 'Receipt Tax / VAT', 'My VAT Share', 'Tax rate(s)', 'Category', 'Subcategory', 'Payment / Received via', 'Money Location', 'Notes'], ...TX.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(t => [t.id, t.type || 'expense', t.date, t.time, t.merchant, t.amount, t.type === 'income' ? '' : (t.receiptTotal ?? t.amount), t.type === 'income' ? '' : (t.subtotal ?? ''), t.type === 'income' ? '' : (t.taxTotal || ''), t.type === 'income' ? '' : (t.personalTax || ''), t.type === 'income' ? '' : ((t.taxRates || []).join(', ')), t.category, t.subcategory || '', t.payment, fundLabel(fundOf(t)), t.notes || ''])];
   const csv = rows.map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n'); downloadBlob(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }), `expenses-${TODAY}.csv`);
 }
 async function exportExcel() {
   try {
     await loadScript('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js', 'XLSX');
-    const txRows = TX.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(t => ({ Type: t.type || 'expense', Date: t.date, Time: t.time, 'Merchant / Source': t.merchant, 'My Amount': t.amount, 'Receipt Total': t.type === 'income' ? '' : (t.receiptTotal ?? t.amount), 'My Subtotal': t.type === 'income' ? '' : (t.subtotal ?? ''), 'Receipt Tax / VAT': t.type === 'income' ? '' : (t.taxTotal || ''), 'My VAT Share': t.type === 'income' ? '' : (t.personalTax || ''), 'Tax rate(s)': t.type === 'income' ? '' : ((t.taxRates || []).join(', ')), Category: t.category, Subcategory: t.subcategory || '', 'Payment / Received via': t.payment, Notes: t.notes || '', Attachment: t.receiptId ? 'Yes' : 'No' }));
+    const txRows = TX.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(t => ({ Type: t.type || 'expense', Date: t.date, Time: t.time, 'Merchant / Source': t.merchant, 'My Amount': t.amount, 'Receipt Total': t.type === 'income' ? '' : (t.receiptTotal ?? t.amount), 'My Subtotal': t.type === 'income' ? '' : (t.subtotal ?? ''), 'Receipt Tax / VAT': t.type === 'income' ? '' : (t.taxTotal || ''), 'My VAT Share': t.type === 'income' ? '' : (t.personalTax || ''), 'Tax rate(s)': t.type === 'income' ? '' : ((t.taxRates || []).join(', ')), Category: t.category, Subcategory: t.subcategory || '', 'Payment / Received via': t.payment, 'Money Location': fundLabel(fundOf(t)), Notes: t.notes || '', Attachment: t.receiptId ? 'Yes' : 'No' }));
     const months = [...new Set(TX.map(t => t.date.slice(0,7)))].sort();
     const summary = months.map(m => ({ Month: monthName(m), Income: incomeSum(inMonth(m)), Expenses: expenseSum(inMonth(m)), Balance: incomeSum(inMonth(m)) - expenseSum(inMonth(m)), Transactions: inMonth(m).length }));
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(txRows), 'Transactions'); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), 'Monthly Summary'); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ACCOUNTS.map(a => ({ Name:a.name, Type:a.type, Balance:a.balance, 'Updated at':a.updatedAt || '' }))), 'Accounts'); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([...CATS.map(c => ({ Type: 'Expense', Category: c.name })), ...INCOME_CATS.map(c => ({ Type: 'Income', Category: c.name }))]), 'Categories');

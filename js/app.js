@@ -372,7 +372,7 @@ function closeSheet() { const s = $('#sheet'); if (s) s.classList.remove('open')
 document.addEventListener('click', e => { if (e.target?.id === 'sheet') closeSheet(); });
 const back = t => `<div class="row" style="margin-bottom:8px"><button class="icon-btn" aria-label="Back" onclick="go('more')">←</button><h1 style="margin:0">${esc(t)}</h1></div>`;
 const empty = (e, t, m, b, a) => `<div class="empty"><div class="e">${e}</div><h3>${esc(t)}</h3><p>${esc(m)}</p>${b ? `<button class="btn" style="max-width:260px" onclick="${a}">${esc(b)}</button>` : ''}</div>`;
-const txRow = t => `<button class="item" onclick="txDetail('${t.id}')">${txCatIco(t)}<div class="grow"><b>${esc(t.merchant)}</b><div class="mut">${t.type === 'income' ? 'Income · ' : ''}${esc(t.category)} · ${fd(t.date)} ${t.receiptId ? '· 📎' : ''}</div></div><span class="amt ${t.type === 'income' ? 'income-amt' : ''}">${t.type === 'income' ? '+' : ''}${eur(t.amount)}</span></button>`;
+const txRow = t => `<button class="item" onclick="txDetail('${t.id}')">${txCatIco(t)}<div class="grow"><b>${esc(t.merchant)}</b><div class="mut">${t.type === 'income' ? 'Income · ' : ''}${esc(t.category)} · ${fundLabel(fundOf(t))} · ${fd(t.date)} ${t.receiptId ? '· 📎' : ''}</div></div><span class="amt ${t.type === 'income' ? 'income-amt' : ''}">${t.type === 'income' ? '+' : ''}${eur(t.amount)}</span></button>`;
 
 function detailList(title, list, opts = {}) {
   const sorted = list.slice().sort((a,b) => b.date.localeCompare(a.date) || String(b.time || '').localeCompare(String(a.time || '')));

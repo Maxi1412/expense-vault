@@ -1,15 +1,14 @@
 const DB = (() => {
   const NAME = 'expense-vault';
-  const VERSION = 2;
+  const VERSION = 3;
   let dbPromise;
 
   function open() {
     if (dbPromise) return dbPromise;
     dbPromise = new Promise((resolve, reject) => {
       const req = indexedDB.open(NAME, VERSION);
-      req.onupgradeneeded = (event) => {
+      req.onupgradeneeded = () => {
         const db = req.result;
-        const upgradeTx = req.transaction;
         if (!db.objectStoreNames.contains('transactions')) {
           const s = db.createObjectStore('transactions', { keyPath: 'id' });
           s.createIndex('date', 'date');
@@ -18,13 +17,6 @@ const DB = (() => {
         }
         if (!db.objectStoreNames.contains('receipts')) db.createObjectStore('receipts', { keyPath: 'id' });
         if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'key' });
-
-        // Explicit user-requested clean start. This runs exactly once when upgrading v1 -> v2.
-        if (event.oldVersion > 0 && event.oldVersion < 2) {
-          upgradeTx.objectStore('transactions').clear();
-          upgradeTx.objectStore('receipts').clear();
-          upgradeTx.objectStore('meta').clear();
-        }
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
@@ -120,20 +112,16 @@ const DB = (() => {
 
 const SafetyDB = (() => {
   const NAME = 'expense-vault-safety';
-  const VERSION = 2;
+  const VERSION = 3;
   let dbPromise;
 
   function open() {
     if (dbPromise) return dbPromise;
     dbPromise = new Promise((resolve, reject) => {
       const req = indexedDB.open(NAME, VERSION);
-      req.onupgradeneeded = (event) => {
+      req.onupgradeneeded = () => {
         const db = req.result;
-        if (!db.objectStoreNames.contains('snapshots')) {
-          db.createObjectStore('snapshots', { keyPath: 'key' });
-        } else if (event.oldVersion > 0 && event.oldVersion < 2) {
-          req.transaction.objectStore('snapshots').clear();
-        }
+        if (!db.objectStoreNames.contains('snapshots')) db.createObjectStore('snapshots', { keyPath: 'key' });
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);

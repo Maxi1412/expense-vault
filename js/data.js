@@ -15,6 +15,7 @@ const INCOME_CATS_DEFAULT = [
 ].map(([name, icon, color]) => ({ id: name, name, icon, color, custom: false }));
 
 const BUDGETS_DEFAULT = [];
+const ACCOUNTS_DEFAULT = [];
 
 const PROFILE_DEFAULT = { name: '', currency: 'EUR', language: 'English', dateFormat: 'DD/MM/YYYY' };
 const SETTINGS_DEFAULT = { theme: 'system', monthlyBudget: 0, ocrLanguages: 'eng+spa+deu' };

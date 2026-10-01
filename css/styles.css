@@ -111,3 +111,10 @@ input[type=color]{padding:5px;height:50px}.rgrid button{min-width:0;overflow:hid
 .share-quick .pill{min-height:38px;padding:7px 12px}
 .share-help{margin:8px 0 0}
 @media(max-width:380px){.share-box .grid2{grid-template-columns:1fr}.share-quick{align-items:flex-start}}
+
+/* Accounts & cash */
+.account-total{border:1px solid var(--line)}
+.account-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+.account-row:last-child{border-bottom:0}
+.account-main{display:flex;flex-direction:column;align-items:flex-start;text-align:left;min-width:0;color:inherit}
+.account-main b,.account-main span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

@@ -624,9 +624,10 @@ function parseReceipt(text) {
   const raw = String(text || '').replace(/\r/g, '');
   const lines = raw.split('\n').map(x => x.trim()).filter(Boolean);
   const low = raw.toLowerCase();
-  const totalWords = /(total|importe|a pagar|amount due|grand total|summe|gesamt|zu zahlen|betrag)/i;
-  const moneyRe = /(?:€|eur\s*)?(-?\d{1,4}(?:[.,]\d{2}))(?:\s*€|\s*eur)?/ig;
+  const totalWords = /(total|importe|a pagar|amount due|grand total|summe|gesamt|zu zahlen|betrag|total ticket|total factura)/i;
+  const moneyRe = /(?:€|eur\s*)?(-?\d{1,6}(?:[.,]\d{2}))(?:\s*€|\s*eur)?/ig;
   let amount = null;
+
   for (const line of lines.filter(x => totalWords.test(x)).reverse()) {
     const vals = [...line.matchAll(moneyRe)].map(m => parseMoney(m[1])).filter(Number.isFinite);
     if (vals.length) { amount = vals[vals.length - 1]; break; }
@@ -635,16 +636,81 @@ function parseReceipt(text) {
     const vals = [...raw.matchAll(moneyRe)].map(m => parseMoney(m[1])).filter(v => Number.isFinite(v) && v > 0 && v < 100000);
     if (vals.length) amount = Math.max(...vals);
   }
-  let date = TODAY;
-  const dm = raw.match(/\b(\d{1,2})[./-](\d{1,2})[./-](20\d{2}|\d{2})\b/);
-  const ym = raw.match(/\b(20\d{2})[./-](\d{1,2})[./-](\d{1,2})\b/);
-  if (ym) date = safeDate(+ym[1], +ym[2], +ym[3]) || TODAY;
-  else if (dm) date = safeDate(+((dm[3].length === 2 ? '20' : '') + dm[3]), +dm[2], +dm[1]) || TODAY;
+
+  const dt = detectReceiptDateTime(raw);
   const payment = detectPaymentMethod(raw);
-  const merchant = detectMerchant(lines);
+  const fund = fundFromPayment(payment);
+  const merchant = detectMerchant(lines, raw);
   const category = categorizeReceipt(merchant, low);
+  const subcategory = inferReceiptSubcategory(category, merchant, low, dt.time);
   const tax = parseTaxInfo(raw, Number.isFinite(amount) ? amount : null);
-  return { merchant, amount: Number.isFinite(amount) ? amount : '', date, category, payment, notes: '', ...tax };
+
+  return {
+    merchant,
+    amount: Number.isFinite(amount) ? amount : '',
+    date: dt.date || TODAY,
+    time: dt.time || '',
+    category,
+    subcategory,
+    payment,
+    fund,
+    notes: '',
+    ...tax
+  };
+}
+
+function detectReceiptDateTime(raw) {
+  const text = String(raw || '').replace(/\r/g, '');
+  const lines = text.split('\n').map(x => x.trim()).filter(Boolean);
+  let date = '', time = '';
+
+  const parseDateText = value => {
+    let m = String(value).match(/\b(20\d{2})[.\/-](\d{1,2})[.\/-](\d{1,2})\b/);
+    if (m) return safeDate(+m[1], +m[2], +m[3]);
+    m = String(value).match(/\b(\d{1,2})[.\/-](\d{1,2})[.\/-](20\d{2}|\d{2})\b/);
+    if (m) return safeDate(+((m[3].length === 2 ? '20' : '') + m[3]), +m[2], +m[1]);
+    return '';
+  };
+  const parseTimeText = value => {
+    const matches = [...String(value).matchAll(/\b([01]?\d|2[0-3])[:.]([0-5]\d)(?::([0-5]\d))?\b/g)];
+    if (!matches.length) return '';
+    const m = matches[0];
+    return String(+m[1]).padStart(2, '0') + ':' + m[2];
+  };
+
+  // Prefer explicitly labelled date/time lines.
+  for (const line of lines) {
+    if (!date && /(fecha|date|datum|fec\.?|f\.\s*venta)/i.test(line)) date = parseDateText(line);
+    if (!time && /(hora|time|uhr|zeit|h\.?\s*venta)/i.test(line)) time = parseTimeText(line);
+  }
+
+  // Then prefer a line containing a date and time together.
+  if (!date || !time) {
+    for (const line of lines) {
+      const d = parseDateText(line), t = parseTimeText(line);
+      if (d && t) {
+        if (!date) date = d;
+        if (!time) time = t;
+        break;
+      }
+    }
+  }
+
+  // Last-resort independent matches.
+  if (!date) {
+    for (const line of lines) {
+      const d = parseDateText(line);
+      if (d) { date = d; break; }
+    }
+  }
+  if (!time) {
+    for (const line of lines) {
+      const t = parseTimeText(line);
+      if (t) { time = t; break; }
+    }
+  }
+
+  return { date: date || TODAY, time };
 }
 
 function parseTaxInfo(raw, totalAmount) {
@@ -703,42 +769,150 @@ function safeDate(y, m, d) {
   if (y < 2000 || y > new Date().getFullYear() + 1 || m < 1 || m > 12 || d < 1 || d > 31) return '';
   const dt = new Date(y, m - 1, d); return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d ? localDateISO(dt) : '';
 }
+
 function detectPaymentMethod(raw) {
   const s = String(raw || '').toLowerCase();
 
-  // Strong, explicit payment descriptions first.
   if (/(direct\s*debit|domiciliaci[oó]n|recibo\s+domiciliado|lastschrift|sepa\s+lastschrift)/i.test(s)) return 'Direct Debit';
-  if (/(bank\s*transfer|transferencia|transfer\s+bank|wire\s+transfer|bank[üu]berweisung|[üu]berweisung|sepa\s+(?:transfer|credit)|bizum)/i.test(s)) return 'Bank Transfer';
+  if (/(bank\s*transfer|transferencia|wire\s+transfer|bank[üu]berweisung|[üu]berweisung|sepa\s+(?:transfer|credit)|bizum)/i.test(s)) return 'Bank Transfer';
 
-  if (/(credit\s*card|tarjeta\s+de\s+cr[eé]dito|tarjeta\s+cr[eé]dito|cr[eé]dito\s+visa|credito\s+visa|kreditkarte)/i.test(s)) return 'Credit Card';
-  if (/(debit\s*card|tarjeta\s+de\s+d[eé]bito|tarjeta\s+d[eé]bito|d[eé]bito\s+visa|debito\s+visa|debitkarte|ec[-\s]?karte|girocard)/i.test(s)) return 'Debit Card';
+  if (/(credit\s*card|tarjeta\s+(?:de\s+)?cr[eé]dito|kreditkarte)/i.test(s)) return 'Credit Card';
+  if (/(debit\s*card|tarjeta\s+(?:de\s+)?d[eé]bito|debitkarte|ec[-\s]?karte|girocard)/i.test(s)) return 'Debit Card';
 
-  // Cash wording. Avoid matching "cashback" as payment.
-  if (/(^|[^a-z])(cash|efectivo|contado|barzahlung|bargeld|en\s+met[aá]lico)([^a-z]|$)/i.test(s) && !/cashback/i.test(s)) return 'Cash';
+  // Explicit cash wording beats generic terminal/card hints.
+  if (/(forma\s*(?:de\s*)?pago\s*[:.-]?\s*efectivo|pago\s*[:.-]?\s*efectivo|efectivo\s*[:.-]?\s*\d|(^|[^a-z])(cash|efectivo|contado|barzahlung|bargeld|en\s+met[aá]lico)([^a-z]|$))/i.test(s) && !/cashback/i.test(s)) return 'Cash';
 
-  // Generic card/terminal evidence when debit-vs-credit is not printed.
   if (/(visa|mastercard|maestro|amex|american\s+express|tarjeta|card\s+(?:payment|paid)|pago\s+con\s+tarjeta|pago\s+tarjeta|contactless|kontaktlos|tpv|dat[aá]fono|terminal\s+(?:id|payment)|chip\s*&?\s*pin|chip\s+and\s+pin)/i.test(s)) return 'Card';
 
   return 'Other';
 }
 
-function detectMerchant(lines) {
-  const reject = /(ticket|receipt|factura|invoice|cif|nif|vat|iva|tel\.?|www\.|https?|fecha|date|hora|time|total|importe|gracias|thank|cliente|customer)/i;
-  const candidates = lines.slice(0, 10).filter(l => /[a-záéíóúüñäöüß]/i.test(l) && !reject.test(l) && l.length >= 2 && l.length <= 55);
-  return (candidates[0] || lines.find(l => /[a-z]/i.test(l)) || '').replace(/[^\p{L}\p{N}&.'’\- ]/gu, '').trim();
+function normalizeMerchantText(s) {
+  return String(s || '')
+    .replace(/[|_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}&.'’\- ]+$/gu, '')
+    .replace(/\s+[a-z]$/i, '')
+    .trim();
 }
+function merchantKey(s) {
+  return normalizeMerchantText(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+}
+function editDistance(a, b) {
+  a = String(a); b = String(b);
+  const row = Array.from({length:b.length+1},(_,i)=>i);
+  for (let i=1;i<=a.length;i++) {
+    let prev=row[0]; row[0]=i;
+    for (let j=1;j<=b.length;j++) {
+      const tmp=row[j];
+      row[j]=Math.min(row[j]+1,row[j-1]+1,prev+(a[i-1]===b[j-1]?0:1));
+      prev=tmp;
+    }
+  }
+  return row[b.length];
+}
+function canonicalMerchant(candidate, raw) {
+  const text = String(raw || '');
+  const known = [
+    ['Mercadona', /\bmercadona\b/i], ['Lidl', /\blidl\b/i], ['Aldi', /\baldi\b/i],
+    ['Carrefour', /\bcarrefour\b/i], ['Consum', /\bconsum\b/i], ['Primark', /\bprimark\b/i],
+    ['Zara', /\bzara\b/i], ['H&M', /\bh\s*&\s*m\b/i], ['Mango', /\bmango\b/i],
+    ['IKEA', /\bikea\b/i], ['Leroy Merlin', /\bleroy\s+merlin\b/i],
+    ['Repsol', /\brepsol\b/i], ['Cepsa', /\bcepsa\b/i]
+  ];
+  const hit = known.find(([,re]) => re.test(text));
+  if (hit) return hit[0];
+
+  let clean = normalizeMerchantText(candidate);
+  if (/\bcasa\s+mandlo\b/i.test(clean) || /\bcasa\s+manolo\b/i.test(clean)) clean = 'Casa Manolo';
+
+  // Reuse a previously corrected merchant name when OCR is very close.
+  const key = merchantKey(clean);
+  if (key.length >= 5 && Array.isArray(TX) && TX.length) {
+    let best = null, bestScore = 0;
+    for (const saved of [...new Set(TX.map(t => t.merchant).filter(Boolean))]) {
+      const sk = merchantKey(saved);
+      if (sk.length < 5) continue;
+      const score = 1 - editDistance(key, sk) / Math.max(key.length, sk.length);
+      if (score > bestScore) { bestScore = score; best = saved; }
+    }
+    if (best && bestScore >= 0.82) return best;
+  }
+
+  if (clean && clean === clean.toUpperCase()) {
+    clean = clean.toLowerCase().replace(/(^|[\s'’\-])\p{L}/gu, m => m.toUpperCase());
+  }
+  return clean;
+}
+function detectMerchant(lines, raw = '') {
+  const reject = /(ticket|receipt|factura|invoice|cif|nif|vat|iva|tel\.?|www\.|https?|fecha|date|hora|time|total|importe|gracias|thank|cliente|customer|mesa|camarero|waiter|forma\s+de\s+pago|efectivo|tarjeta)/i;
+  const address = /(calle|c\/|avda|avenida|plaza|paseo|carretera|urbanizaci[oó]n|cp\s*\d|alicante|murcia|madrid|spain|españa)/i;
+  let best = '', bestScore = -Infinity;
+
+  lines.slice(0, 14).forEach((line, i) => {
+    const clean = normalizeMerchantText(line);
+    if (!clean || clean.length < 2 || clean.length > 60 || reject.test(clean)) return;
+    const letters = (clean.match(/\p{L}/gu) || []).length;
+    const digits = (clean.match(/\d/g) || []).length;
+    if (letters < 2 || digits > Math.max(3, letters)) return;
+    let score = 70 - i * 5;
+    if (clean === clean.toUpperCase() && letters >= 4) score += 18;
+    if (clean.length >= 4 && clean.length <= 30) score += 12;
+    if (address.test(clean)) score -= 35;
+    if (/\b(s\.?l\.?|s\.?l\.?u\.?|s\.?a\.?)\b/i.test(clean)) score -= 8;
+    if (score > bestScore) { bestScore = score; best = clean; }
+  });
+
+  return canonicalMerchant(best || lines.find(l => /\p{L}/u.test(l)) || '', raw);
+}
+
 function categorizeReceipt(merchant, text) {
   const s = `${merchant} ${text}`.toLowerCase();
+
   const rules = [
-    ['Groceries', /mercadona|lidl|aldi|carrefour|supermerc|hipermerc|grocery|spar\b|consum\b/],
-    ['Pharmacy', /farmacia|pharmacy|apotheke/], ['Dental', /dentist|dental|odont/], ['Medical', /clinic|hospital|medical|medico|médico/],
-    ['Fuel', /repsol|cepsa|shell|bp\b|gasolin|petrol|diesel/], ['Dining', /restaurant|restaurante|cafe|café|bar\b|bistro|tapas/],
-    ['Takeaway', /just eat|ubereats|uber eats|glovo|takeaway|delivery/], ['Pets', /veterinar|pet shop|mascota/],
-    ['Internet & Phone', /vodafone|movistar|orange|telefon|internet|fiber|fibra/], ['Utilities', /electric|iberdrola|endesa|water|agua|gas natural/],
-    ['Transport', /renfe|metro|bus|taxi|uber|cabify|train/], ['Clothing', /zara|primark|h&m|mango|clothing|fashion|ropa/],
-    ['Household', /ikea|leroy merlin|ferreter|hardware/], ['Shopping', /amazon|shopping|store|tienda/]
+    ['Groceries', /mercadona|lidl|aldi|carrefour|supermerc|hipermerc|grocery|spar\b|consum\b|dia%?|eroski|alcampo/],
+    ['Pharmacy', /farmacia|pharmacy|apotheke/],
+    ['Dental', /dentist|dental|odont/],
+    ['Medical', /clinic|hospital|medical|medico|médico|salud/],
+    ['Fuel', /repsol|cepsa|shell|bp\b|gasolin|petrol|diesel|combustible/],
+    ['Takeaway', /just eat|ubereats|uber eats|glovo|takeaway|delivery|a domicilio/],
+    ['Pets', /veterinar|pet shop|mascota|zooplus/],
+    ['Internet & Phone', /vodafone|movistar|orange|digi\b|telefon|internet|fiber|fibra|recarga|top.?up|recharge/],
+    ['Utilities', /electric|iberdrola|endesa|water|agua|gas natural/],
+    ['Transport', /renfe|metro|bus|taxi|uber|cabify|train|tranv[ií]a/],
+    ['Clothing', /zara|primark|h\s*&\s*m|mango|clothing|fashion|ropa|camiseta|pantal[oó]n|vestido|zapato|zapatilla|shoe|sneaker|calzado/],
+    ['Household', /ikea|leroy merlin|ferreter|hardware|bricolaje/]
   ];
-  return (rules.find(([, re]) => re.test(s)) || ['Other'])[0];
+  const direct = rules.find(([,re]) => re.test(s));
+  if (direct) return direct[0];
+
+  // Restaurant receipts often do not literally print "restaurant".
+  const diningStrong = /(restaurant|restaurante|cafeter[ií]a|cafe\b|café\b|bistro|tapas|casa manolo|mesa\b|camarero|waiter|comensal|men[uú]\b|cuenta\b)/i;
+  const diningItems = /(vino|cerveza|caña|copa|refresco|agua\s+mineral|tostada|bocadillo|croqueta|ensalada|paella|pizza|hamburg|burger|postre|raci[oó]n|plato|caf[eé]|pan\b)/i;
+  if (diningStrong.test(s) || diningItems.test(s)) return 'Dining';
+
+  if (/amazon|shopping|store|tienda|comercio/.test(s)) return 'Shopping';
+  return 'Other';
+}
+
+function inferReceiptSubcategory(category, merchant, text, time) {
+  const s = `${merchant} ${text}`.toLowerCase();
+  if (category === 'Dining') {
+    if (/desayuno|breakfast|fr[uü]hst[uü]ck|brunch/.test(s)) return 'Breakfast';
+    if (/almuerzo|comida\b|lunch|mittagessen/.test(s)) return 'Lunch';
+    if (/cena\b|dinner|abendessen/.test(s)) return 'Dinner';
+    const h = /^\d{2}:\d{2}$/.test(time || '') ? Number(time.slice(0,2)) : NaN;
+    if (Number.isFinite(h)) {
+      if (h >= 5 && h < 11) return 'Breakfast';
+      if (h >= 11 && h < 17) return 'Lunch';
+      if (h >= 17 || h < 3) return 'Dinner';
+    }
+    return '';
+  }
+  if (category === 'Groceries') return 'Supermarket';
+  if (category === 'Clothing' && /(zapato|zapatilla|shoe|sneaker|calzado|footwear)/.test(s)) return 'Shoes';
+  if (category === 'Internet & Phone' && /(recarga|top.?up|recharge|saldo)/.test(s)) return 'Top-up';
+  return '';
 }
 
 /* ---------- expense form ---------- */
@@ -763,8 +937,8 @@ function txForm(id, d) {
   </div>
   <div class="grid2"><div><label for="ftax">Receipt Tax / VAT (optional)</label><input id="ftax" type="number" inputmode="decimal" step="0.01" min="0" value="${Number(t.taxTotal || 0) ? t.taxTotal : ''}" placeholder="Auto-detected"></div><div><label>Tax rate</label><input value="${(t.taxRates || []).length ? esc(t.taxRates.join(', ') + '%') : ''}" placeholder="Auto-detected" readonly></div></div>
   <label for="fm">Merchant / Payee</label><input id="fm" value="${esc(t.merchant || '')}" placeholder="e.g. Mercadona">
-  <div class="grid2"><div><label for="fd">Date</label><input id="fd" type="date" value="${t.date || TODAY}"></div><div><label for="fpay">Payment</label><select id="fpay" onchange="syncFundFromPayment('fpay','ffund')">${o(PAYMENTS, t.payment)}</select></div></div>
-  <label for="ffund">Paid from</label><select id="ffund"><option value="card" ${t.fund==='card'?'selected':''}>Bank / Card</option><option value="cash" ${t.fund==='cash'?'selected':''}>Cash</option></select>
+  <div class="grid2"><div><label for="fd">Date</label><input id="fd" type="date" value="${t.date || TODAY}"></div><div><label for="ftime">Time</label><input id="ftime" type="time" value="${esc(t.time || '')}"></div></div>
+  <div class="grid2"><div><label for="fpay">Payment</label><select id="fpay" onchange="syncFundFromPayment('fpay','ffund')">${o(PAYMENTS, t.payment)}</select></div><div><label for="ffund">Paid from</label><select id="ffund"><option value="card" ${t.fund==='card'?'selected':''}>Bank / Card</option><option value="cash" ${t.fund==='cash'?'selected':''}>Cash</option></select></div></div>
   <label for="fcat">Category</label><select id="fcat">${o(CATS.map(c => c.name), t.category)}</select>
   <label for="fsub">Subcategory (optional)</label><input id="fsub" value="${esc(t.subcategory || '')}">
   <label for="fn">Notes</label><textarea id="fn" rows="2">${esc(t.notes || '')}</textarea>
@@ -790,7 +964,7 @@ async function saveTx(id) {
     const taxRates = draft?.taxRates || old?.taxRates || [];
     const shareRatio = receiptTotal > 0 ? Math.max(0, Math.min(1, a / receiptTotal)) : 1;
     const personalTax = Math.round(taxTotal * shareRatio * 100) / 100;
-    const t = { id: id || uid('e'), type: 'expense', date: $('#fd').value || TODAY, time: old?.time || new Date().toTimeString().slice(0, 5), merchant: m, amount: a, receiptTotal, taxTotal, personalTax, taxRates, receiptSubtotal: Math.round(Math.max(0, receiptTotal - taxTotal) * 100) / 100, subtotal: Math.round(Math.max(0, a - personalTax) * 100) / 100, category: $('#fcat').value, subcategory: $('#fsub').value.trim(), payment: $('#fpay').value, fund: $('#ffund').value, notes: $('#fn').value.trim(), receiptId, ocrText: draft?.ocrText || old?.ocrText || '', created: old?.created || now, modified: now };
+    const t = { id: id || uid('e'), type: 'expense', date: $('#fd').value || TODAY, time: $('#ftime')?.value || old?.time || new Date().toTimeString().slice(0, 5), merchant: m, amount: a, receiptTotal, taxTotal, personalTax, taxRates, receiptSubtotal: Math.round(Math.max(0, receiptTotal - taxTotal) * 100) / 100, subtotal: Math.round(Math.max(0, a - personalTax) * 100) / 100, category: $('#fcat').value, subcategory: $('#fsub').value.trim(), payment: $('#fpay').value, fund: $('#ffund').value, notes: $('#fn').value.trim(), receiptId, ocrText: draft?.ocrText || old?.ocrText || '', created: old?.created || now, modified: now };
     await store.save(t);
     if (oldReceiptId && oldReceiptId !== receiptId) {
       const remaining = await DB.all('transactions');

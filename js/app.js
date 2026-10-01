@@ -185,23 +185,22 @@ const store = {
     const i = TX.findIndex(x => x.id === t.id);
     i < 0 ? TX.push(t) : (TX[i] = t);
     await DB.put('transactions', t);
-    scheduleSafetySnapshot();
+    await writeSafetySnapshot();
   },
   async remove(id) {
     const t = this.get(id);
     TX = TX.filter(x => x.id !== id);
     await DB.remove('transactions', id);
     if (t?.receiptId && !TX.some(x => x.receiptId === t.receiptId)) await deleteReceipt(t.receiptId);
-    scheduleSafetySnapshot();
+    await writeSafetySnapshot();
   }
 };
 
-async function saveMeta(key, value) { await DB.setMeta(key, value); scheduleSafetySnapshot(); }
+async function saveMeta(key, value) { await DB.setMeta(key, value); await writeSafetySnapshot(); }
 async function deleteReceipt(id) {
   if (!id) return;
   const u = RECEIPT_URLS.get(id); if (u) URL.revokeObjectURL(u);
   RECEIPT_URLS.delete(id); RECEIPTS.delete(id); await DB.remove('receipts', id);
-  scheduleSafetySnapshot();
 }
 function receiptUrl(id) {
   if (!id) return '';
@@ -857,7 +856,14 @@ function restoreBackupPick() {
   }; i.click();
 }
 async function confirmRestore() {
-  if (!restorePayload) return; await DB.importAll(restorePayload); restorePayload = null; await reloadData(); closeSheet(); go('home');
+  if (!restorePayload) return;
+  await writeSafetySnapshot();
+  await DB.importAll(restorePayload);
+  restorePayload = null;
+  await reloadData();
+  await writeSafetySnapshot();
+  closeSheet();
+  go('home');
 }
 function resetLocalDataPrompt() {
   sheet(`<h2>Erase all local data?</h2><p>This permanently deletes every transaction, saved receipt image, budget and customised setting on this device.</p><p class="mut">Create a full backup first if you may need the records again.</p><label for="resetWord">Type <b>DELETE</b> to confirm</label><input id="resetWord" autocomplete="off" placeholder="DELETE"><div class="btns"><button class="btn ghost" onclick="closeSheet()">Cancel</button><button class="btn del" onclick="resetLocalData()">Erase data</button></div>`);

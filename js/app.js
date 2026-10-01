@@ -93,10 +93,49 @@ async function restoreSafetySnapshot() {
   go('home');
 }
 
+async function recoverKnownRealDataOnce() {
+  const marker = await DB.getMeta('recovery-2026-10-01-v1', false);
+  if (marker) return;
+  const alreadyThere = TX.some(t =>
+    (t.type || 'expense') === 'expense' &&
+    t.date === '2026-10-01' &&
+    Math.abs(Number(t.amount || 0) - 3) < 0.001 &&
+    /digi|top.?up|recharge|phone/i.test(`${t.merchant || ''} ${t.notes || ''}`)
+  );
+  if (!alreadyThere) {
+    const now = new Date().toISOString();
+    await DB.put('transactions', {
+      id: 'recovery-digi-topup-2026-10-01',
+      type: 'expense',
+      date: '2026-10-01',
+      time: '',
+      merchant: 'DIGI phone top-up',
+      amount: 3,
+      receiptTotal: 3,
+      taxTotal: 0,
+      personalTax: 0,
+      taxRates: [],
+      subtotal: 3,
+      receiptSubtotal: 3,
+      category: 'Internet & Phone',
+      subcategory: '',
+      payment: 'Other',
+      notes: 'Recovered after storage incident. Edit the payment method if needed.',
+      receiptId: null,
+      ocrText: '',
+      created: now,
+      modified: now
+    });
+  }
+  await DB.setMeta('recovery-2026-10-01-v1', true);
+  await reloadData();
+}
+
 async function init() {
   await DB.open();
   await SafetyDB.open();
   await reloadData();
+  await recoverKnownRealDataOnce();
   await refreshSafetyStatus();
   if (!safetyStatus.savedAt && TX.length) await writeSafetySnapshot();
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredInstallPrompt = e; if (S.v === 'more' || S.v === 'settings') render(); });

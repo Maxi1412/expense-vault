@@ -671,8 +671,9 @@ function detectReceiptDateTime(raw) {
     if (m) return safeDate(+((m[3].length === 2 ? '20' : '') + m[3]), +m[2], +m[1]);
     return '';
   };
-  const parseTimeText = value => {
-    const matches = [...String(value).matchAll(/\b([01]?\d|2[0-3])[:.]([0-5]\d)(?::([0-5]\d))?\b/g)];
+  const parseTimeText = (value, allowDot = false) => {
+    const re = allowDot ? /\b([01]?\d|2[0-3])[:.]([0-5]\d)(?::([0-5]\d))?\b/g : /\b([01]?\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?\b/g;
+    const matches = [...String(value).matchAll(re)];
     if (!matches.length) return '';
     const m = matches[0];
     return String(+m[1]).padStart(2, '0') + ':' + m[2];
@@ -681,7 +682,7 @@ function detectReceiptDateTime(raw) {
   // Prefer explicitly labelled date/time lines.
   for (const line of lines) {
     if (!date && /(fecha|date|datum|fec\.?|f\.\s*venta)/i.test(line)) date = parseDateText(line);
-    if (!time && /(hora|time|uhr|zeit|h\.?\s*venta)/i.test(line)) time = parseTimeText(line);
+    if (!time && /(hora|time|uhr|zeit|h\.?\s*venta)/i.test(line)) time = parseTimeText(line, true);
   }
 
   // Then prefer a line containing a date and time together.

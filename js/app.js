@@ -214,7 +214,6 @@ async function init() {
   await JournalDB.open();
   await persistLocalStorage();
   await reloadData();
-  await reloadData();
   await refreshSafetyStatus();
   if (!(await JournalDB.latest().catch(() => null))) await captureRedundantState('bootstrap');
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredInstallPrompt = e; if (S.v === 'more' || S.v === 'settings') render(); });
@@ -301,10 +300,26 @@ async function saveMeta(key, value) {
   else if (key === 'profile') PROFILE = structuredClone(value);
   else if (key === 'settings') SETTINGS = structuredClone(value);
 }
+async function saveReceiptProtected(blob, name, created = new Date().toISOString(), staged = false) {
+  const id = uid('r');
+  const row = { id, blob, name: name || `receipt-${TODAY}.jpg`, type: blob.type || 'image/jpeg', size: blob.size, created, staged };
+  await protectedMutation('receipt-save', async () => {
+    await DB.put('receipts', row);
+    const check = await DB.get('receipts', id);
+    if (!check) throw new Error('Receipt save integrity check failed.');
+  });
+  RECEIPTS.set(id, row);
+  return id;
+}
 async function deleteReceipt(id) {
   if (!id) return;
+  await protectedMutation('receipt-delete', async () => {
+    await DB.remove('receipts', id);
+    const check = await DB.get('receipts', id);
+    if (check) throw new Error('Receipt delete integrity check failed.');
+  });
   const u = RECEIPT_URLS.get(id); if (u) URL.revokeObjectURL(u);
-  RECEIPT_URLS.delete(id); RECEIPTS.delete(id); await DB.remove('receipts', id);
+  RECEIPT_URLS.delete(id); RECEIPTS.delete(id);
 }
 function receiptUrl(id) {
   if (!id) return '';
@@ -539,17 +554,11 @@ async function scanPreview(file) {
   try {
     const blob = await compressReceipt(file);
     if (draft?.previewUrl) URL.revokeObjectURL(draft.previewUrl);
-    const receiptId = uid('r');
     const now = new Date().toISOString();
-    const row = { id: receiptId, blob, name: file.name || `receipt-${TODAY}.jpg`, type: blob.type || 'image/jpeg', size: blob.size, created: now, staged: true };
-    await protectedMutation('receipt-upload', async () => {
-      await DB.put('receipts', row);
-      const check = await DB.get('receipts', receiptId);
-      if (!check) throw new Error('Receipt image could not be protected.');
-    });
-    RECEIPTS.set(receiptId, row);
+    const originalName = file.name || `receipt-${TODAY}.jpg`;
+    const receiptId = await saveReceiptProtected(blob, originalName, now, true);
     const previewUrl = URL.createObjectURL(blob);
-    draft = { file: blob, receiptId, originalName: row.name, previewUrl, date: TODAY, notes: '', scanned: true, ocrText: '' };
+    draft = { file: blob, receiptId, originalName, previewUrl, date: TODAY, notes: '', scanned: true, ocrText: '' };
     sheet(`<h2>Receipt preview</h2><img class="rcp" alt="Receipt preview" src="${previewUrl}" style="max-height:56vh;object-fit:contain"><div class="btns"><button class="btn ghost" onclick="addChoose()">Retake</button><button class="btn" onclick="processReceipt()">Read receipt</button></div><p class="mut">✓ Image protected locally before OCR.</p>`);
   } catch (e) { toast('Could not safely store this image. Please try again.'); }
 }
@@ -754,17 +763,15 @@ async function saveTx(id) {
   if (!(a > 0) || !m) { $('#err').textContent = 'Enter your amount and a merchant.'; return; }
   if (!(receiptTotal > 0)) { $('#err').textContent = 'Enter the receipt total.'; return; }
   const old = id ? store.get(id) : null, now = new Date().toISOString();
-  let receiptId = old?.receiptId || draft?.receiptId || null;
+  const oldReceiptId = old?.receiptId || null;
+  let receiptId = oldReceiptId || draft?.receiptId || null;
   try {
-    if (old?.receiptId && $('#removeReceipt')?.checked) { await deleteReceipt(old.receiptId); receiptId = null; }
+    if (oldReceiptId && $('#removeReceipt')?.checked) receiptId = null;
     let newBlob = null, newName = '';
     if (!id && draft?.file && !draft?.receiptId) { newBlob = draft.file; newName = draft.originalName; }
     else if ($('#fr')?.files?.[0]) { newBlob = await compressReceipt($('#fr').files[0]); newName = $('#fr').files[0].name; }
     if (newBlob) {
-      if (receiptId) await deleteReceipt(receiptId);
-      receiptId = uid('r');
-      const row = { id: receiptId, blob: newBlob, name: newName || `receipt-${$('#fd').value || TODAY}.jpg`, type: newBlob.type || 'image/jpeg', size: newBlob.size, created: now };
-      await DB.put('receipts', row); RECEIPTS.set(receiptId, row);
+      receiptId = await saveReceiptProtected(newBlob, newName || `receipt-${$('#fd').value || TODAY}.jpg`, now, true);
     }
     const taxTotal = Math.max(0, parseFloat($('#ftax')?.value) || 0);
     const taxRates = draft?.taxRates || old?.taxRates || [];
@@ -772,6 +779,10 @@ async function saveTx(id) {
     const personalTax = Math.round(taxTotal * shareRatio * 100) / 100;
     const t = { id: id || uid('e'), type: 'expense', date: $('#fd').value || TODAY, time: old?.time || new Date().toTimeString().slice(0, 5), merchant: m, amount: a, receiptTotal, taxTotal, personalTax, taxRates, receiptSubtotal: Math.round(Math.max(0, receiptTotal - taxTotal) * 100) / 100, subtotal: Math.round(Math.max(0, a - personalTax) * 100) / 100, category: $('#fcat').value, subcategory: $('#fsub').value.trim(), payment: $('#fpay').value, fund: $('#ffund').value, notes: $('#fn').value.trim(), receiptId, ocrText: draft?.ocrText || old?.ocrText || '', created: old?.created || now, modified: now };
     await store.save(t);
+    if (oldReceiptId && oldReceiptId !== receiptId) {
+      const remaining = await DB.all('transactions');
+      if (!remaining.some(x => x.receiptId === oldReceiptId)) await deleteReceipt(oldReceiptId);
+    }
     if (receiptId) {
       const rr = await DB.get('receipts', receiptId);
       if (rr?.staged) { rr.staged = false; await DB.put('receipts', rr); RECEIPTS.set(receiptId, rr); await captureRedundantState('receipt-finalized'); }
@@ -805,18 +816,24 @@ async function saveIncome(id) {
   const a = parseFloat($('#ia').value), m = $('#im').value.trim();
   if (!(a > 0) || !m) { $('#ierr').textContent = 'Enter an amount and the income source.'; return; }
   const old = id ? store.get(id) : null, now = new Date().toISOString();
-  let receiptId = old?.receiptId || null;
+  const oldReceiptId = old?.receiptId || null;
+  let receiptId = oldReceiptId;
   try {
-    if (old?.receiptId && $('#iremove')?.checked) { await deleteReceipt(old.receiptId); receiptId = null; }
+    if (oldReceiptId && $('#iremove')?.checked) receiptId = null;
     if ($('#iproof')?.files?.[0]) {
       const newBlob = await compressReceipt($('#iproof').files[0]);
-      if (receiptId) await deleteReceipt(receiptId);
-      receiptId = uid('r');
-      const row = { id: receiptId, blob: newBlob, name: $('#iproof').files[0].name || `income-${$('#idate').value || TODAY}.jpg`, type: newBlob.type || 'image/jpeg', size: newBlob.size, created: now };
-      await DB.put('receipts', row); RECEIPTS.set(receiptId, row);
+      receiptId = await saveReceiptProtected(newBlob, $('#iproof').files[0].name || `income-${$('#idate').value || TODAY}.jpg`, now, true);
     }
     const t = { id: id || uid('i'), type: 'income', date: $('#idate').value || TODAY, time: old?.time || new Date().toTimeString().slice(0, 5), merchant: m, amount: a, category: $('#icat').value, subcategory: '', payment: $('#ipay').value, fund: $('#ifund').value, notes: $('#inotes').value.trim(), receiptId, ocrText: '', created: old?.created || now, modified: now };
     await store.save(t);
+    if (oldReceiptId && oldReceiptId !== receiptId) {
+      const remaining = await DB.all('transactions');
+      if (!remaining.some(x => x.receiptId === oldReceiptId)) await deleteReceipt(oldReceiptId);
+    }
+    if (receiptId) {
+      const rr = await DB.get('receipts', receiptId);
+      if (rr?.staged) { rr.staged = false; await DB.put('receipts', rr); RECEIPTS.set(receiptId, rr); await captureRedundantState('income-attachment-finalized'); }
+    }
     S.mo = monthOffsetForDate(t.date);
     sheet(`<div style="text-align:center;padding:24px 0"><div style="font-size:54px">✓</div><h2>Income saved</h2><p class="income-amt">+${eur(a)} added as ${esc(t.category)}.</p></div><button class="btn" onclick="closeSheet();go('home')">Done</button>`);
   } catch (e) { const err = $('#ierr'); if (err) err.textContent = 'Could not save this income. ' + (e.message || ''); }

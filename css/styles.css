@@ -125,3 +125,14 @@ input[type=color]{padding:5px;height:50px}.rgrid button{min-width:0;overflow:hid
 .recovery-alert{border:1px solid var(--warn)}
 .recovery-alert b{display:block;margin-bottom:4px}
 .recovery-alert .btn{margin-top:10px}
+
+/* Bank/Card and Cash balances */
+.money-location-card{padding:14px 16px}
+.money-location-head{margin-bottom:10px}
+.money-location-head h2{margin:0}
+.money-location-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.money-location-grid button{display:flex;flex-direction:column;align-items:flex-start;text-align:left;background:var(--bg);border:1px solid var(--line);border-radius:15px;padding:13px;min-width:0;color:inherit}
+.money-location-grid button:active{transform:scale(.99)}
+.money-location-grid b{font-size:22px;margin-top:3px;max-width:100%;overflow-wrap:anywhere}
+.money-loc-icon{font-size:22px;margin-bottom:3px}
+@media(max-width:360px){.money-location-grid{grid-template-columns:1fr}}

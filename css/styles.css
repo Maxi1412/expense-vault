@@ -136,3 +136,6 @@ input[type=color]{padding:5px;height:50px}.rgrid button{min-width:0;overflow:hid
 .money-location-grid b{font-size:22px;margin-top:3px;max-width:100%;overflow-wrap:anywhere}
 .money-loc-icon{font-size:22px;margin-bottom:3px}
 @media(max-width:360px){.money-location-grid{grid-template-columns:1fr}}
+
+.hero-month-flow{margin-top:12px;font-size:13px;line-height:1.45;color:rgba(255,255,255,.9)}
+.available-total{margin-bottom:12px}

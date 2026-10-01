@@ -107,13 +107,16 @@ async function restoreSafetyHistory(key) {
   go('home');
 }
 
-function recoveryObjects(value, out = []) {
+function recoveryObjects(value, out = [], seen = new WeakSet()) {
+  if (!value || typeof value !== 'object') return out;
+  if (seen.has(value)) return out;
+  seen.add(value);
   if (Array.isArray(value)) {
-    value.forEach(v => recoveryObjects(v, out));
-  } else if (value && typeof value === 'object') {
+    value.forEach(v => recoveryObjects(v, out, seen));
+  } else {
     out.push(value);
     Object.values(value).forEach(v => {
-      if (v && typeof v === 'object') recoveryObjects(v, out);
+      if (v && typeof v === 'object') recoveryObjects(v, out, seen);
     });
   }
   return out;

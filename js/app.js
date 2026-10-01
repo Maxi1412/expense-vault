@@ -3,6 +3,7 @@ let TX = [];
 let CATS = [];
 let INCOME_CATS = [];
 let BUDGETS = [];
+let ACCOUNTS = [];
 let PAYMENTS = [];
 let PROFILE = {};
 let SETTINGS = {};
@@ -112,6 +113,7 @@ async function reloadData() {
   legacy.forEach(t => t.type = 'expense');
   if (legacy.length) await Promise.all(legacy.map(t => DB.put('transactions', t)));
   BUDGETS = await DB.getMeta('budgets', structuredClone(BUDGETS_DEFAULT));
+  ACCOUNTS = await DB.getMeta('accounts', structuredClone(ACCOUNTS_DEFAULT));
   PAYMENTS = await DB.getMeta('payments', structuredClone(PAYMENTS_DEFAULT));
   const missingPayments = PAYMENTS_DEFAULT.filter(p => !PAYMENTS.includes(p));
   if (missingPayments.length) {
@@ -131,6 +133,7 @@ async function ensureDefaultsSaved() {
   if ((await DB.getMeta('categories', null)) === null) await DB.setMeta('categories', CATS);
   if ((await DB.getMeta('incomeCategories', null)) === null) await DB.setMeta('incomeCategories', INCOME_CATS);
   if ((await DB.getMeta('budgets', null)) === null) await DB.setMeta('budgets', BUDGETS);
+  if ((await DB.getMeta('accounts', null)) === null) await DB.setMeta('accounts', ACCOUNTS);
   if ((await DB.getMeta('payments', null)) === null) await DB.setMeta('payments', PAYMENTS);
   if ((await DB.getMeta('profile', null)) === null) await DB.setMeta('profile', PROFILE);
   if ((await DB.getMeta('settings', null)) === null) await DB.setMeta('settings', SETTINGS);
@@ -188,13 +191,13 @@ const donutCard = l => `<div class="row donut-wrap"><div>${donut(byCat(l).slice(
 
 /* ---------- shell ---------- */
 const NAV = [['home', '⌂', 'Home'], ['tx', '▤', 'Activity'], ['add', '＋', 'Add'], ['analytics', '▥', 'Analytics'], ['more', '☰', 'More']];
-const SUBS = ['budgets', 'receipts', 'cats', 'backup', 'settings', 'profile'];
+const SUBS = ['accounts', 'budgets', 'receipts', 'cats', 'backup', 'settings', 'profile'];
 function go(v) { S.v = v; if (v !== 'tx') S.q = ''; closeSheet(); render(); scrollTo(0, 0); }
 function render() {
   const t = S.theme === 'system' ? (matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light') : S.theme;
   document.documentElement.dataset.theme = t;
   const on = SUBS.includes(S.v) ? 'more' : S.v;
-  const viewFn = { home, tx: txView, analytics, more, budgets, receipts, cats, backup, settings, profile }[S.v] || home;
+  const viewFn = { home, tx: txView, analytics, more, accounts, budgets, receipts, cats, backup, settings, profile }[S.v] || home;
   $('#app').innerHTML = `<main id="main">${viewFn()}</main><nav aria-label="Main">${NAV.map(([k, i, l]) => k === 'add'
     ? `<button class="fab" aria-label="Add transaction" onclick="addChoose()">${i}</button>`
     : `<button class="${on === k ? 'on' : ''}" aria-current="${on === k ? 'page' : 'false'}" onclick="go('${k}')"><span aria-hidden="true">${i}</span>${l}</button>`).join('')}</nav>`;
@@ -676,10 +679,36 @@ function analytics() {
 
 /* ---------- more / budgets / categories ---------- */
 function more() {
-  const it = [['budgets', '🎯', 'Budgets'], ['receipts', '🧾', 'Receipts'], ['cats', '🏷️', 'Categories'], ['backup', '💾', 'Export & Backup'], ['settings', '⚙️', 'Settings'], ['profile', '👤', 'Profile']];
+  const it = [['accounts', '💳', 'Accounts & Cash'], ['budgets', '🎯', 'Budgets'], ['receipts', '🧾', 'Receipts'], ['cats', '🏷️', 'Categories'], ['backup', '💾', 'Export & Backup'], ['settings', '⚙️', 'Settings'], ['profile', '👤', 'Profile']];
   return `<h1>More</h1>${deferredInstallPrompt ? '<button class="btn install-btn" onclick="installApp()">Install Expense Vault</button>' : ''}<div class="card">${it.map(([k, i, n]) => `<button class="item" onclick="go('${k}')"><span class="ico" style="background:var(--acc2)">${i}</span><b class="grow">${n}</b>›</button>`).join('')}</div>`;
 }
 async function installApp() { if (!deferredInstallPrompt) return; deferredInstallPrompt.prompt(); await deferredInstallPrompt.userChoice; deferredInstallPrompt = null; render(); }
+
+function accounts() {
+  const total = ACCOUNTS.reduce((a,x)=>a+Number(x.balance||0),0);
+  const rows = ACCOUNTS.map((a,i) => `<div class="account-row"><div class="ico" style="background:var(--acc2)">${a.type==='Cash'?'💶':a.type==='Savings'?'🏦':a.type==='Bank'?'💳':'💰'}</div><button class="grow account-main" onclick="accountForm(${i})"><b>${esc(a.name)}</b><span class="mut">${esc(a.type)} · updated ${a.updatedAt ? new Date(a.updatedAt).toLocaleDateString('en-GB') : '—'}</span></button><b class="amt">${eur(a.balance)}</b></div>`).join('');
+  return back('Accounts & Cash') + `<div class="card account-total"><span class="mut">Total available funds</span><div class="big">${eur(total)}</div><p class="mut">These are balance snapshots and are kept separate from income and expense totals.</p></div>
+  <div class="card">${rows || empty('💳','No accounts yet','Add cash, bank or savings balances here.')}</div><button class="btn" onclick="accountForm(-1)">Add account</button>`;
+}
+function accountForm(i) {
+  const a = ACCOUNTS[i] || { id: uid('acct'), name:'', type:'Bank', balance:'' };
+  sheet(`<h2>${i<0?'Add account':'Edit account'}</h2><label for="an">Name</label><input id="an" value="${esc(a.name||'')}" placeholder="e.g. Cash wallet, Bank account"><label for="at">Type</label><select id="at">${['Cash','Bank','Savings','Other'].map(x=>`<option value="${x}" ${a.type===x?'selected':''}>${x}</option>`).join('')}</select><label for="ab">Current balance</label><input id="ab" class="amt-in" type="number" step="0.01" inputmode="decimal" value="${a.balance ?? ''}" placeholder="0.00"><p class="mut">This is a balance snapshot, not income. Updating it does not change your spending history.</p><p id="aerr" class="up"></p><div class="btns">${i>=0?'<button class="btn del" onclick="removeAccount('+i+')">Delete</button>':''}<button class="btn" onclick="saveAccount(${i})">Save</button></div>`);
+}
+async function saveAccount(i) {
+  const name=$('#an').value.trim(), balance=parseFloat($('#ab').value);
+  if(!name || !Number.isFinite(balance)) { $('#aerr').textContent='Enter an account name and balance.'; return; }
+  const old=i>=0?ACCOUNTS[i]:null;
+  const a={id:old?.id||uid('acct'),name,type:$('#at').value,balance,created:old?.created||new Date().toISOString(),updatedAt:new Date().toISOString()};
+  if(i>=0) ACCOUNTS[i]=a; else ACCOUNTS.push(a);
+  await saveMeta('accounts',ACCOUNTS);
+  closeSheet(); render();
+}
+async function removeAccount(i) {
+  ACCOUNTS.splice(i,1);
+  await saveMeta('accounts',ACCOUNTS);
+  closeSheet(); render();
+}
+
 function budgets() {
   const l = expenses(inMonth(TODAY.slice(0, 7))), cards = BUDGETS.map((b, i) => {
     const s = sum(l.filter(t => t.category === b.cat)), p = b.limit ? s / b.limit * 100 : 0, [c, txt, col] = status(p);

@@ -58,6 +58,7 @@ let safetyStatus = { savedAt: '', count: 0 };
 let recoveryAvailable = false;
 
 async function writeSafetySnapshot() {
+  if (recoveryAvailable) return;
   try {
     const payload = await DB.exportAll();
     await SafetyDB.save(payload);
@@ -84,6 +85,7 @@ async function restoreSafetySnapshot() {
   if (!snap?.payload) return toast('No safety recovery copy is available.');
   await DB.importAll(snap.payload);
   await reloadData();
+  recoveryAvailable = false;
   await writeSafetySnapshot();
   closeSheet();
   go('home');
@@ -860,6 +862,7 @@ async function confirmRestore() {
   await DB.importAll(restorePayload);
   restorePayload = null;
   await reloadData();
+  recoveryAvailable = false;
   await writeSafetySnapshot();
   closeSheet();
   go('home');

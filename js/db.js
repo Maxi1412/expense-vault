@@ -217,3 +217,76 @@ const SafetyDB = (() => {
 
   return { open, save, get, list, getSnapshot, clear, setFlag, getFlag };
 })();
+
+
+const JournalDB = (() => {
+  const NAME = 'expense-vault-journal';
+  const VERSION = 1;
+  let dbPromise;
+
+  function open() {
+    if (dbPromise) return dbPromise;
+    dbPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open(NAME, VERSION);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('snapshots')) db.createObjectStore('snapshots', { keyPath: 'id', autoIncrement: true });
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    return dbPromise;
+  }
+
+  async function save(payload, reason = 'mutation') {
+    const db = await open();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('snapshots', 'readwrite');
+      tx.objectStore('snapshots').add({ savedAt: new Date().toISOString(), reason, payload });
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('Journal write failed'));
+    });
+    await prune(30);
+    return true;
+  }
+
+  async function list() {
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      const req = db.transaction('snapshots', 'readonly').objectStore('snapshots').getAll();
+      req.onsuccess = () => resolve((req.result || []).sort((a,b) => Number(b.id || 0) - Number(a.id || 0)));
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function latest() {
+    const rows = await list();
+    return rows[0] || null;
+  }
+
+  async function prune(limit = 30) {
+    const rows = await list();
+    if (rows.length <= limit) return true;
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('snapshots', 'readwrite');
+      const store = tx.objectStore('snapshots');
+      rows.slice(limit).forEach(x => store.delete(x.id));
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async function clear() {
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('snapshots', 'readwrite');
+      tx.objectStore('snapshots').clear();
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  return { open, save, list, latest, clear };
+})();

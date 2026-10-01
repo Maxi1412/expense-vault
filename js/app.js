@@ -54,7 +54,6 @@ const catIco = c => `<div class="ico" style="background:${cat(c).color}22" aria-
 const txCatIco = t => `<div class="ico" style="background:${txCat(t).color}22" aria-hidden="true">${txCat(t).icon}</div>`;
 const status = p => p >= 100 ? ['ov', 'Over budget', 'var(--bad)'] : p >= 80 ? ['wn', 'Approaching', 'var(--warn)'] : ['ok', 'On track', 'var(--ok)'];
 
-let safetyTimer = null;
 let safetyStatus = { savedAt: '', count: 0 };
 
 async function writeSafetySnapshot() {
@@ -65,10 +64,6 @@ async function writeSafetySnapshot() {
   } catch (e) {
     console.error('Safety snapshot failed', e);
   }
-}
-function scheduleSafetySnapshot() {
-  clearTimeout(safetyTimer);
-  safetyTimer = setTimeout(() => writeSafetySnapshot(), 250);
 }
 async function refreshSafetyStatus() {
   try {
@@ -334,6 +329,7 @@ function home() {
     ${budget > 0 ? `<div class="bar" style="margin:12px 0 8px"><i style="width:${pct}%"></i></div><div class="row sp"><span>${rem >= 0 ? eur(rem) + ' budget remaining' : eur(-rem) + ' over budget'}</span><span>of ${eur(budget)}</span></div>` : '<div style="margin-top:10px">No monthly budget set</div>'}
     <span class="hero-breakdown-label">View monthly breakdown ›</span>
   </button></div>
+  ${ACCOUNTS.length ? `<button class="card funds-card" onclick="go('accounts')"><div><span class="mut">Available funds</span><b>${eur(ACCOUNTS.reduce((a,x)=>a+Number(x.balance||0),0))}</b></div><span class="tap-more">Cash & accounts ›</span></button>` : ''}
   <div class="grid2"><button class="card stat tap-card" onclick="drillPeriod('expense',TODAY,TODAY,'Today’s expenses')"><span class="mut">Today spent</span><b>${eur(expenseSum(TX.filter(t => t.date === TODAY)))}</b><span class="tap-more">View details ›</span></button><button class="card stat tap-card" onclick="drillPeriod('expense',add(TODAY,-6),TODAY,'This week’s expenses')"><span class="mut">This week spent</span><b>${eur(expenseSum(wk))}</b><span class="tap-more">View details ›</span></button>
   <button class="card stat tap-card" onclick="drillMonth('income','${k}','Income · ${monthName(k)}')"><span class="mut">Income this month</span><b class="income-amt">${eur(inc)}</b><span class="tap-more">View details ›</span></button><button class="card stat tap-card" onclick="drillMonth('expense','${k}','Expenses · ${monthName(k)}')"><span class="mut">Monthly spending</span><b>${eur(out)}</b><span class="tap-more">View details ›</span></button></div>
   <button class="card daily-spending-card" style="margin-top:14px" onclick="dailySpendingBreakdown('${k}')" aria-label="Open daily spending breakdown"><div class="row sp"><h2>Daily spending</h2><span class="tap-more" style="margin:0">View days ›</span></div>${bars(dv, dv.map((_, i) => (i + 1) % 5 === 0 ? i + 1 : ''))}</button>
@@ -885,7 +881,7 @@ async function exportExcel() {
     const txRows = TX.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(t => ({ Type: t.type || 'expense', Date: t.date, Time: t.time, 'Merchant / Source': t.merchant, 'My Amount': t.amount, 'Receipt Total': t.type === 'income' ? '' : (t.receiptTotal ?? t.amount), 'My Subtotal': t.type === 'income' ? '' : (t.subtotal ?? ''), 'Receipt Tax / VAT': t.type === 'income' ? '' : (t.taxTotal || ''), 'My VAT Share': t.type === 'income' ? '' : (t.personalTax || ''), 'Tax rate(s)': t.type === 'income' ? '' : ((t.taxRates || []).join(', ')), Category: t.category, Subcategory: t.subcategory || '', 'Payment / Received via': t.payment, Notes: t.notes || '', Attachment: t.receiptId ? 'Yes' : 'No' }));
     const months = [...new Set(TX.map(t => t.date.slice(0,7)))].sort();
     const summary = months.map(m => ({ Month: monthName(m), Income: incomeSum(inMonth(m)), Expenses: expenseSum(inMonth(m)), Balance: incomeSum(inMonth(m)) - expenseSum(inMonth(m)), Transactions: inMonth(m).length }));
-    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(txRows), 'Transactions'); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), 'Monthly Summary'); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([...CATS.map(c => ({ Type: 'Expense', Category: c.name })), ...INCOME_CATS.map(c => ({ Type: 'Income', Category: c.name }))]), 'Categories');
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(txRows), 'Transactions'); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), 'Monthly Summary'); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ACCOUNTS.map(a => ({ Name:a.name, Type:a.type, Balance:a.balance, 'Updated at':a.updatedAt || '' }))), 'Accounts'); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([...CATS.map(c => ({ Type: 'Expense', Category: c.name })), ...INCOME_CATS.map(c => ({ Type: 'Income', Category: c.name }))]), 'Categories');
     XLSX.writeFile(wb, `expenses-${TODAY}.xlsx`);
   } catch (e) { toast('Excel export could not load. CSV export is available offline.'); }
 }

@@ -206,7 +206,7 @@ async function recoverOctoberIncidentOnce() {
 
 async function restoreLatestRedundantBackupIfNeeded() {
   const current = await DB.exportAll();
-  if (current.transactions.length || current.meta.length > 0) return false;
+  if (current.transactions.length) return false;
 
   const j = await JournalDB.latest().catch(() => null);
   if (j?.payload?.transactions?.length) {
@@ -567,10 +567,19 @@ async function scanPreview(file) {
   try {
     const blob = await compressReceipt(file);
     if (draft?.previewUrl) URL.revokeObjectURL(draft.previewUrl);
+    const receiptId = uid('r');
+    const now = new Date().toISOString();
+    const row = { id: receiptId, blob, name: file.name || `receipt-${TODAY}.jpg`, type: blob.type || 'image/jpeg', size: blob.size, created: now, staged: true };
+    await protectedMutation('receipt-upload', async () => {
+      await DB.put('receipts', row);
+      const check = await DB.get('receipts', receiptId);
+      if (!check) throw new Error('Receipt image could not be protected.');
+    });
+    RECEIPTS.set(receiptId, row);
     const previewUrl = URL.createObjectURL(blob);
-    draft = { file: blob, originalName: file.name || `receipt-${TODAY}.jpg`, previewUrl, date: TODAY, notes: '', scanned: true, ocrText: '' };
-    sheet(`<h2>Receipt preview</h2><img class="rcp" alt="Receipt preview" src="${previewUrl}" style="max-height:56vh;object-fit:contain"><div class="btns"><button class="btn ghost" onclick="addChoose()">Retake</button><button class="btn" onclick="processReceipt()">Read receipt</button></div>`);
-  } catch (e) { toast('Could not open this image. Please try another photo.'); }
+    draft = { file: blob, receiptId, originalName: row.name, previewUrl, date: TODAY, notes: '', scanned: true, ocrText: '' };
+    sheet(`<h2>Receipt preview</h2><img class="rcp" alt="Receipt preview" src="${previewUrl}" style="max-height:56vh;object-fit:contain"><div class="btns"><button class="btn ghost" onclick="addChoose()">Retake</button><button class="btn" onclick="processReceipt()">Read receipt</button></div><p class="mut">✓ Image protected locally before OCR.</p>`);
+  } catch (e) { toast('Could not safely store this image. Please try again.'); }
 }
 async function compressReceipt(file) {
   const bmp = await createImageBitmap(file);
@@ -771,11 +780,11 @@ async function saveTx(id) {
   if (!(a > 0) || !m) { $('#err').textContent = 'Enter your amount and a merchant.'; return; }
   if (!(receiptTotal > 0)) { $('#err').textContent = 'Enter the receipt total.'; return; }
   const old = id ? store.get(id) : null, now = new Date().toISOString();
-  let receiptId = old?.receiptId || null;
+  let receiptId = old?.receiptId || draft?.receiptId || null;
   try {
     if (old?.receiptId && $('#removeReceipt')?.checked) { await deleteReceipt(old.receiptId); receiptId = null; }
     let newBlob = null, newName = '';
-    if (!id && draft?.file) { newBlob = draft.file; newName = draft.originalName; }
+    if (!id && draft?.file && !draft?.receiptId) { newBlob = draft.file; newName = draft.originalName; }
     else if ($('#fr')?.files?.[0]) { newBlob = await compressReceipt($('#fr').files[0]); newName = $('#fr').files[0].name; }
     if (newBlob) {
       if (receiptId) await deleteReceipt(receiptId);
@@ -789,6 +798,10 @@ async function saveTx(id) {
     const personalTax = Math.round(taxTotal * shareRatio * 100) / 100;
     const t = { id: id || uid('e'), type: 'expense', date: $('#fd').value || TODAY, time: old?.time || new Date().toTimeString().slice(0, 5), merchant: m, amount: a, receiptTotal, taxTotal, personalTax, taxRates, receiptSubtotal: Math.round(Math.max(0, receiptTotal - taxTotal) * 100) / 100, subtotal: Math.round(Math.max(0, a - personalTax) * 100) / 100, category: $('#fcat').value, subcategory: $('#fsub').value.trim(), payment: $('#fpay').value, notes: $('#fn').value.trim(), receiptId, ocrText: draft?.ocrText || old?.ocrText || '', created: old?.created || now, modified: now };
     await store.save(t);
+    if (receiptId) {
+      const rr = await DB.get('receipts', receiptId);
+      if (rr?.staged) { rr.staged = false; await DB.put('receipts', rr); RECEIPTS.set(receiptId, rr); await captureRedundantState('receipt-finalized'); }
+    }
     S.mo = monthOffsetForDate(t.date);
     if (draft?.previewUrl) URL.revokeObjectURL(draft.previewUrl);
     const wasScan = !!draft?.scanned; draft = null;

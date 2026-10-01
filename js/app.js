@@ -59,16 +59,113 @@ const txCatIco = t => `<div class="ico" style="background:${txCat(t).color}22" a
 const status = p => p >= 100 ? ['ov', 'Over budget', 'var(--bad)'] : p >= 80 ? ['wn', 'Approaching', 'var(--warn)'] : ['ok', 'On track', 'var(--ok)'];
 
 let safetyStatus = { savedAt: '', count: 0 };
+let backupStatus = { journal: false, safety: false, opfs: false };
+
+async function writeOpfsBackup(payload) {
+  try {
+    if (!navigator.storage?.getDirectory) return false;
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle('expense-vault-auto-backup', { create: true });
+    const receiptMeta = [];
+    for (const r of payload.receipts || []) {
+      const meta = { ...r, blob: undefined, backupFile: r.blob ? `receipt-${r.id}.bin` : '' };
+      receiptMeta.push(meta);
+      if (r.blob) {
+        const fh = await dir.getFileHandle(meta.backupFile, { create: true });
+        const w = await fh.createWritable();
+        await w.write(r.blob);
+        await w.close();
+      }
+    }
+    const backup = { ...payload, receipts: receiptMeta, app: 'Expense Vault', automatic: true };
+    const fh = await dir.getFileHandle('backup.json', { create: true });
+    const w = await fh.createWritable();
+    await w.write(JSON.stringify(backup));
+    await w.close();
+    backupStatus.opfs = true;
+    return true;
+  } catch (e) {
+    console.warn('OPFS backup unavailable', e);
+    backupStatus.opfs = false;
+    return false;
+  }
+}
+
+async function readOpfsBackup() {
+  try {
+    if (!navigator.storage?.getDirectory) return null;
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle('expense-vault-auto-backup');
+    const fh = await dir.getFileHandle('backup.json');
+    const raw = JSON.parse(await (await fh.getFile()).text());
+    raw.receipts = await Promise.all((raw.receipts || []).map(async r => {
+      let blob = new Blob();
+      if (r.backupFile) {
+        try { blob = await (await dir.getFileHandle(r.backupFile)).getFile(); } catch (_) {}
+      }
+      return { ...r, blob, backupFile: undefined };
+    }));
+    return raw;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function clearOpfsBackup() {
+  try {
+    if (!navigator.storage?.getDirectory) return;
+    const root = await navigator.storage.getDirectory();
+    await root.removeEntry('expense-vault-auto-backup', { recursive: true });
+  } catch (_) {}
+}
+
+async function persistLocalStorage() {
+  try {
+    if (navigator.storage?.persist) await navigator.storage.persist();
+  } catch (_) {}
+}
+
+async function captureRedundantState(reason, payload = null) {
+  const state = payload || await DB.exportAll();
+  const results = await Promise.allSettled([
+    SafetyDB.save(state),
+    JournalDB.save(state, reason),
+    writeOpfsBackup(state)
+  ]);
+  backupStatus.safety = results[0].status === 'fulfilled';
+  backupStatus.journal = results[1].status === 'fulfilled';
+  if (backupStatus.safety) safetyStatus = { savedAt: new Date().toISOString(), count: state.transactions.length };
+  return state;
+}
+
+async function protectedMutation(reason, mutate, validate) {
+  const before = await DB.exportAll();
+  await captureRedundantState('before:' + reason, before);
+  try {
+    await mutate(before);
+    if (validate) await validate(before);
+    const after = await DB.exportAll();
+    await captureRedundantState('after:' + reason, after);
+    return after;
+  } catch (e) {
+    try {
+      await DB.importAll(before);
+      await captureRedundantState('rollback:' + reason, before);
+    } catch (restoreError) {
+      console.error('Rollback failed', restoreError);
+    }
+    throw e;
+  }
+}
 
 async function writeSafetySnapshot() {
   try {
-    const payload = await DB.exportAll();
-    await SafetyDB.save(payload);
-    safetyStatus = { savedAt: new Date().toISOString(), count: payload.transactions.length };
+    await captureRedundantState('snapshot');
   } catch (e) {
     console.error('Safety snapshot failed', e);
   }
 }
+
 async function refreshSafetyStatus() {
   try {
     const snap = await SafetyDB.get();
@@ -77,6 +174,58 @@ async function refreshSafetyStatus() {
     safetyStatus = { savedAt: '', count: 0 };
   }
 }
+
+async function recoverOctoberIncidentOnce() {
+  try {
+    if (await SafetyDB.getFlag('incident-recovery-2026-10-01-v1')) return false;
+    const current = await DB.exportAll();
+    const rows = await SafetyDB.list();
+    const candidates = rows.filter(x => {
+      const tx = x.payload?.transactions || [];
+      if (String(x.savedAt || '') < '2026-10-01T11:45:00Z') return false;
+      if (tx.length <= current.transactions.length) return false;
+      return !tx.some(t => /demo|sample|test transaction/i.test(`${t.merchant || ''} ${t.notes || ''}`));
+    }).sort((a,b) => {
+      const dc = (b.payload?.transactions?.length || 0) - (a.payload?.transactions?.length || 0);
+      return dc || String(b.savedAt).localeCompare(String(a.savedAt));
+    });
+    const best = candidates[0];
+    if (best?.payload) {
+      await DB.importAll(best.payload);
+      await SafetyDB.setFlag('incident-recovery-2026-10-01-v1', true);
+      await JournalDB.save(best.payload, 'incident-recovery');
+      await writeOpfsBackup(best.payload);
+      return true;
+    }
+    await SafetyDB.setFlag('incident-recovery-2026-10-01-v1', true);
+  } catch (e) {
+    console.warn('Incident recovery unavailable', e);
+  }
+  return false;
+}
+
+async function restoreLatestRedundantBackupIfNeeded() {
+  const current = await DB.exportAll();
+  if (current.transactions.length || current.meta.length > 0) return false;
+
+  const j = await JournalDB.latest().catch(() => null);
+  if (j?.payload?.transactions?.length) {
+    await DB.importAll(j.payload);
+    return true;
+  }
+  const s = await SafetyDB.get().catch(() => null);
+  if (s?.payload?.transactions?.length) {
+    await DB.importAll(s.payload);
+    return true;
+  }
+  const o = await readOpfsBackup();
+  if (o?.transactions?.length) {
+    await DB.importAll(o);
+    return true;
+  }
+  return false;
+}
+
 async function restoreSafetySnapshotPrompt() {
   const snap = await SafetyDB.get();
   if (!snap?.payload) return toast('No safety copy is available yet.');
@@ -85,34 +234,34 @@ async function restoreSafetySnapshotPrompt() {
 async function restoreSafetySnapshot() {
   const snap = await SafetyDB.get();
   if (!snap?.payload) return toast('No safety copy is available.');
-  await DB.importAll(snap.payload);
+  await protectedMutation('restore-safety', async () => DB.importAll(snap.payload));
   await reloadData();
-  await writeSafetySnapshot();
-  closeSheet();
-  S.mo = 0;
-  go('home');
+  closeSheet(); S.mo = 0; go('home');
 }
 async function safetyHistory() {
   const rows = await SafetyDB.list();
   if (!rows.length) return toast('No recovery history is available yet.');
-  sheet(`<h2>Recovery history</h2><p class="mut">Expense Vault keeps up to 20 recent safety snapshots on this device.</p><div class="card">${rows.slice(0,20).map(x => `<button class="item" onclick="restoreSafetyHistory('${jsarg(x.key)}')"><div class="grow"><b>${new Date(x.savedAt).toLocaleString()}</b><div class="mut">${x.payload?.transactions?.length || 0} transactions · ${x.payload?.receipts?.length || 0} attachments</div></div>›</button>`).join('')}</div>`, true);
+  sheet(`<h2>Recovery history</h2><p class="mut">Expense Vault keeps recent automatic snapshots on this device.</p><div class="card">${rows.slice(0,20).map(x => `<button class="item" onclick="restoreSafetyHistory('${jsarg(x.key)}')"><div class="grow"><b>${new Date(x.savedAt).toLocaleString()}</b><div class="mut">${x.payload?.transactions?.length || 0} transactions · ${x.payload?.receipts?.length || 0} attachments</div></div>›</button>`).join('')}</div>`, true);
 }
 async function restoreSafetyHistory(key) {
   const snap = await SafetyDB.getSnapshot(key);
   if (!snap?.payload) return toast('That recovery snapshot is no longer available.');
-  await DB.importAll(snap.payload);
+  await protectedMutation('restore-history', async () => DB.importAll(snap.payload));
   await reloadData();
-  await writeSafetySnapshot();
-  closeSheet();
-  S.mo = 0;
-  go('home');
+  closeSheet(); S.mo = 0; go('home');
 }
 
 async function init() {
   await DB.open();
   await SafetyDB.open();
+  await JournalDB.open();
+  await persistLocalStorage();
+  await reloadData();
+  await recoverOctoberIncidentOnce();
+  await restoreLatestRedundantBackupIfNeeded();
   await reloadData();
   await refreshSafetyStatus();
+  if (!(await JournalDB.latest().catch(() => null))) await captureRedundantState('bootstrap');
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredInstallPrompt = e; if (S.v === 'more' || S.v === 'settings') render(); });
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
   if (matchMedia) matchMedia('(prefers-color-scheme:dark)').addEventListener('change', () => S.theme === 'system' && render());
@@ -157,38 +306,35 @@ const store = {
   all: () => TX,
   get: id => TX.find(t => t.id === id),
   async save(t) {
-    const before = await DB.exportAll();
-    const existed = before.transactions.some(x => x.id === t.id);
-    const expected = before.transactions.length + (existed ? 0 : 1);
-    await DB.put('transactions', t);
-    const after = await DB.all('transactions');
-    if (after.length !== expected || !after.some(x => x.id === t.id)) {
-      await DB.importAll(before);
-      await reloadData();
-      throw new Error('Save integrity check failed. Your previous records were restored automatically.');
-    }
+    await protectedMutation('transaction-save', async before => {
+      const existed = before.transactions.some(x => x.id === t.id);
+      const expected = before.transactions.length + (existed ? 0 : 1);
+      await DB.put('transactions', t);
+      const after = await DB.all('transactions');
+      if (after.length !== expected || !after.some(x => x.id === t.id)) throw new Error('Transaction save integrity check failed.');
+    });
     await reloadData();
-    await writeSafetySnapshot();
   },
   async remove(id) {
-    const before = await DB.exportAll();
-    const t = before.transactions.find(x => x.id === id);
-    if (!t) return;
-    await DB.remove('transactions', id);
+    const existing = await DB.get('transactions', id);
+    if (!existing) return;
+    await protectedMutation('transaction-delete', async before => {
+      await DB.remove('transactions', id);
+      const after = await DB.all('transactions');
+      if (after.length !== before.transactions.length - 1 || after.some(x => x.id === id)) throw new Error('Transaction delete integrity check failed.');
+    });
     const remaining = await DB.all('transactions');
-    if (remaining.length !== before.transactions.length - 1 || remaining.some(x => x.id === id)) {
-      await DB.importAll(before);
-      await reloadData();
-      throw new Error('Delete integrity check failed. Your previous records were restored automatically.');
-    }
-    if (t.receiptId && !remaining.some(x => x.receiptId === t.receiptId)) await deleteReceipt(t.receiptId);
+    if (existing.receiptId && !remaining.some(x => x.receiptId === existing.receiptId)) await deleteReceipt(existing.receiptId);
     await reloadData();
-    await writeSafetySnapshot();
   }
 };
 
 async function saveMeta(key, value) {
-  await DB.setMeta(key, value);
+  await protectedMutation('meta-' + key, async () => {
+    await DB.setMeta(key, value);
+    const check = await DB.getMeta(key, null);
+    if (check === null) throw new Error('Metadata save integrity check failed.');
+  });
   if (key === 'categories') CATS = structuredClone(value);
   else if (key === 'incomeCategories') INCOME_CATS = structuredClone(value);
   else if (key === 'budgets') BUDGETS = structuredClone(value);
@@ -196,7 +342,6 @@ async function saveMeta(key, value) {
   else if (key === 'payments') PAYMENTS = structuredClone(value);
   else if (key === 'profile') PROFILE = structuredClone(value);
   else if (key === 'settings') SETTINGS = structuredClone(value);
-  await writeSafetySnapshot();
 }
 async function deleteReceipt(id) {
   if (!id) return;
@@ -824,7 +969,7 @@ function receiptFilterSheet() {
 function backup() {
   return back('Export & Backup') + `<div class="card" style="text-align:center"><div style="font-size:44px">🔒</div><h2>Your records stay on this device</h2><p class="mut">Expense data and receipt images are stored in your browser's local database. Create backups regularly so clearing browser data or losing the device cannot erase your records.</p><div id="storageInfo" class="mut">${storageEstimateText()}</div></div>
   <button class="btn" onclick="createBackup()" style="margin-bottom:10px">💾 Create Full Backup</button><button class="btn sec" onclick="restoreBackupPick()" style="margin-bottom:10px">♻️ Restore Backup</button><button class="btn ghost" onclick="restoreSafetySnapshotPrompt()" style="margin-bottom:10px">🛟 Restore Last Safety Copy</button><button class="btn ghost" onclick="safetyHistory()" style="margin-bottom:10px">🕘 Recovery History</button><button class="btn ghost" onclick="requestPersistentStorage()" style="margin-bottom:10px">Protect Local Storage</button>
-  <div class="card"><h2>Automatic safety copy</h2><p class="mut">${safetyStatus.savedAt ? `Last saved ${new Date(safetyStatus.savedAt).toLocaleString()} · ${safetyStatus.count} transactions` : 'A safety copy will be created automatically after your next saved entry.'}</p><p class="mut">This is stored separately from the main Expense Vault database on this device.</p></div>
+  <div class="card"><h2>Automatic protection</h2><p class="mut">${safetyStatus.savedAt ? `Last protected ${new Date(safetyStatus.savedAt).toLocaleString()} · ${safetyStatus.count} transactions` : 'Protection starts automatically with your next saved entry.'}</p><p class="mut">Every change is mirrored to the main database, a separate safety database, an append-only journal, and—when supported by this browser—an additional private file-system backup.</p></div>
   <div class="card" style="margin-top:14px"><h2>Export transactions</h2><div class="btns export-btns"><button class="btn sec" onclick="exportCsv()">CSV</button><button class="btn sec" onclick="exportExcel()">Excel</button></div></div>
   <div class="card" style="margin-top:14px"><h2>Reset</h2><p class="mut">Permanently remove all local transactions, receipt images, budgets and personal settings from this installation.</p><button class="btn del" onclick="resetLocalDataPrompt()">Erase all local data</button></div>`;
 }
@@ -874,7 +1019,7 @@ function resetLocalDataPrompt() {
 }
 async function resetLocalData() {
   if (($('#resetWord')?.value || '').trim().toUpperCase() !== 'DELETE') return toast('Type DELETE to confirm.');
-  await DB.clear('transactions'); await DB.clear('receipts'); await DB.clear('meta'); await SafetyDB.clear();
+  await DB.clear('transactions'); await DB.clear('receipts'); await DB.clear('meta'); await SafetyDB.clear(); await JournalDB.clear(); await clearOpfsBackup();
   draft = null; S.mo = 0; S.q = ''; S.range = 'all'; S.from = ''; S.to = ''; S.f = { type: '', cat: '', pay: '', min: '', max: '', sort: 'new' }; S.rf = { cat: '', from: '', to: '', min: '', max: '' }; S.rq = '';
   await reloadData(); await refreshSafetyStatus(); closeSheet(); go('home'); toast('Local data erased. Expense Vault is ready for a fresh start.');
 }

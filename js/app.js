@@ -55,6 +55,7 @@ const txCatIco = t => `<div class="ico" style="background:${txCat(t).color}22" a
 const status = p => p >= 100 ? ['ov', 'Over budget', 'var(--bad)'] : p >= 80 ? ['wn', 'Approaching', 'var(--warn)'] : ['ok', 'On track', 'var(--ok)'];
 
 let safetyStatus = { savedAt: '', count: 0 };
+let recoveryAvailable = false;
 
 async function writeSafetySnapshot() {
   try {
@@ -132,6 +133,7 @@ async function init() {
   await reloadData();
   await recoverKnownRealDataOnce();
   await refreshSafetyStatus();
+  recoveryAvailable = TX.length === 0 && safetyStatus.count > 0;
   if (!safetyStatus.savedAt && TX.length) await writeSafetySnapshot();
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredInstallPrompt = e; if (S.v === 'more' || S.v === 'settings') render(); });
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
@@ -322,6 +324,7 @@ function home() {
   const dv = Array.from({ length: dim }, (_, i) => expenseSum(l.filter(t => +t.date.slice(8) === i + 1)));
   const pct = budget > 0 ? Math.min(100, out / budget * 100) : 0;
   return `<div class="month"><button aria-label="Previous month" onclick="S.mo--;render()">‹</button><h1 style="margin:0;font-size:20px">${monthName(k)}</h1><button aria-label="Next month" ${S.mo >= 0 ? 'disabled style="opacity:.3"' : ''} onclick="S.mo++;render()">›</button></div>
+  ${recoveryAvailable ? `<div class="card recovery-alert"><b>Safety copy available</b><p class="mut">The main database is empty but a previous safety copy contains ${safetyStatus.count} transactions.</p><button class="btn" onclick="restoreSafetySnapshotPrompt()">Review recovery copy</button></div>` : ''}
   <div class="card hero"><div class="row sp"><span>${cur ? 'This month · balance' : 'Monthly balance'}</span><button class="icon-btn hero-search" aria-label="Search" onclick="gsearch()">⌕</button></div>
   <button class="hero-summary" onclick="monthOverview('${k}')" aria-label="Open monthly breakdown">
     <div class="big">${eur(balance)}</div>

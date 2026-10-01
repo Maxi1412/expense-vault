@@ -336,6 +336,18 @@ function fundActivity(fund) {
     <div class="card detail-list">${l.map(txRow).join('') || empty('💶','No activity yet','Transactions assigned to this money location will appear here.')}</div>`, true);
 }
 
+function availableMoneyOverview() {
+  const card = fundBalance('card'), cash = fundBalance('cash'), total = card + cash;
+  const recent = TX.slice().sort((a,b) => b.date.localeCompare(a.date) || String(b.time || '').localeCompare(String(a.time || ''))).slice(0,10);
+  sheet(`<div class="detail-head"><div><h2 style="margin:0">Available money</h2><div class="mut">Current balance across all recorded transactions</div></div></div>
+    <div class="card available-total"><span class="mut">Total available</span><div class="detail-total ${total >= 0 ? 'income-amt' : 'up'}">${eur(total)}</div></div>
+    <div class="money-location-grid" style="margin-bottom:14px">
+      <button onclick="fundActivity('card')"><span class="money-loc-icon">💳</span><span class="mut">Bank / Card</span><b>${eur(card)}</b><span class="tap-more">View activity ›</span></button>
+      <button onclick="fundActivity('cash')"><span class="money-loc-icon">💶</span><span class="mut">Cash</span><b>${eur(cash)}</b><span class="tap-more">View activity ›</span></button>
+    </div>
+    <div class="card"><div class="row sp"><h2>Recent activity</h2><button class="detail-link" onclick="closeSheet();go('tx')">See all ›</button></div>${recent.map(txRow).join('') || '<p class="mut">No activity yet.</p>'}</div>`, true);
+}
+
 /* ---------- charts ---------- */
 function bars(vals, labels, color = 'var(--acc)') {
   const max = Math.max(...vals, 1), w = 300 / Math.max(vals.length, 1);
@@ -447,22 +459,23 @@ function dailySpendingBreakdown(key) {
 
 /* ---------- home ---------- */
 function home() {
-  const k = monthKey(S.mo), cur = S.mo === 0, l = inMonth(k), out = expenseSum(l), inc = incomeSum(l), balance = inc - out, budget = Number(SETTINGS.monthlyBudget || 0), rem = budget - out;
+  const k = monthKey(S.mo), cur = S.mo === 0, l = inMonth(k), out = expenseSum(l), inc = incomeSum(l), monthlyNet = inc - out, budget = Number(SETTINGS.monthlyBudget || 0), rem = budget - out;
+  const cardAvailable = fundBalance('card'), cashAvailable = fundBalance('cash'), totalAvailable = cardAvailable + cashAvailable;
   const days = cur ? Math.max(1, +TODAY.slice(8)) : new Date(+k.slice(0, 4), +k.slice(5), 0).getDate();
   const pk = monthKey(S.mo - 1), pl = expenses(inMonth(pk)).filter(t => +t.date.slice(8) <= days), ps = sum(pl), ch = ps ? (out - ps) / ps * 100 : 0;
   const wk = between(add(TODAY, -6), TODAY), dim = new Date(+k.slice(0, 4), +k.slice(5), 0).getDate();
   const dv = Array.from({ length: dim }, (_, i) => expenseSum(l.filter(t => +t.date.slice(8) === i + 1)));
   const pct = budget > 0 ? Math.min(100, out / budget * 100) : 0;
   return `<div class="month"><button aria-label="Previous month" onclick="S.mo--;render()">‹</button><h1 style="margin:0;font-size:20px">${monthName(k)}</h1><button aria-label="Next month" ${S.mo >= 0 ? 'disabled style="opacity:.3"' : ''} onclick="S.mo++;render()">›</button></div>
-  <div class="card hero"><div class="row sp"><span>${cur ? 'This month · balance' : 'Monthly balance'}</span><button class="icon-btn hero-search" aria-label="Search" onclick="gsearch()">⌕</button></div>
-  <button class="hero-summary" onclick="monthOverview('${k}')" aria-label="Open monthly breakdown">
-    <div class="big">${eur(balance)}</div>
-    <div class="row sp hero-money-row"><span>Income <b>${eur(inc)}</b></span><span>Expenses <b>${eur(out)}</b></span></div>
-    ${budget > 0 ? `<div class="bar" style="margin:12px 0 8px"><i style="width:${pct}%"></i></div><div class="row sp"><span>${rem >= 0 ? eur(rem) + ' budget remaining' : eur(-rem) + ' over budget'}</span><span>of ${eur(budget)}</span></div>` : '<div style="margin-top:10px">No monthly budget set</div>'}
-    <span class="hero-breakdown-label">View monthly breakdown ›</span>
+  <div class="card hero"><div class="row sp"><span>Total available</span><button class="icon-btn hero-search" aria-label="Search" onclick="gsearch()">⌕</button></div>
+  <button class="hero-summary" onclick="availableMoneyOverview()" aria-label="Open available money breakdown">
+    <div class="big">${eur(totalAvailable)}</div>
+    <div class="row sp hero-money-row"><span>Bank / Card <b>${eur(cardAvailable)}</b></span><span>Cash <b>${eur(cashAvailable)}</b></span></div>
+    <div class="hero-month-flow">This month: Income ${eur(inc)} · Expenses ${eur(out)} · Net ${eur(monthlyNet)}</div>
+    <span class="hero-breakdown-label">View balance breakdown ›</span>
   </button></div>
   <div class="card money-location-card">
-    <div class="row sp money-location-head"><h2>Available money</h2><span class="mut">All recorded transactions</span></div>
+    <div class="row sp money-location-head"><h2>Available money</h2><span class="mut">Running balances</span></div>
     <div class="money-location-grid">
       <button onclick="fundActivity('card')"><span class="money-loc-icon">💳</span><span class="mut">Bank / Card</span><b>${eur(fundBalance('card'))}</b><span class="tap-more">View activity ›</span></button>
       <button onclick="fundActivity('cash')"><span class="money-loc-icon">💶</span><span class="mut">Cash</span><b>${eur(fundBalance('cash'))}</b><span class="tap-more">View activity ›</span></button>

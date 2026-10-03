@@ -225,6 +225,16 @@ async function init() {
 async function reloadData() {
   TX = await DB.all('transactions');
   CATS = await DB.getMeta('categories', structuredClone(CATS_DEFAULT));
+  const catDefaultsVersion = Number(await DB.getMeta('expenseCategoriesVersion', 0) || 0);
+  if (catDefaultsVersion < 2) {
+    const existingNames = new Set(CATS.map(x => x.name));
+    const missingDefaults = CATS_DEFAULT.filter(x => !existingNames.has(x.name)).map(x => structuredClone(x));
+    if (missingDefaults.length) {
+      CATS = [...CATS, ...missingDefaults];
+      await DB.setMeta('categories', CATS);
+    }
+    await DB.setMeta('expenseCategoriesVersion', 2);
+  }
   INCOME_CATS = await DB.getMeta('incomeCategories', structuredClone(INCOME_CATS_DEFAULT));
   const legacy = TX.filter(t => !t.type);
   legacy.forEach(t => t.type = 'expense');
@@ -882,6 +892,10 @@ function categorizeReceipt(merchant, text) {
     ['Utilities', /electric|iberdrola|endesa|water|agua|gas natural/],
     ['Transport', /renfe|metro|bus|taxi|uber|cabify|train|tranv[ií]a/],
     ['Clothing', /zara|primark|h\s*&\s*m|mango|clothing|fashion|ropa|camiseta|pantal[oó]n|vestido|zapato|zapatilla|shoe|sneaker|calzado/],
+    ['Tobacco', /tabaco|tobacco|cigarr|cigarette|cigarro|cigar\b|estanco|iqos|heets|terea|camel\b|marlboro|chesterfield|winston\b|lucky strike/],
+    ['Banking & Fees', /comisi[oó]n\s+(?:bancaria|cuenta|tarjeta)|bank\s+fee|banking\s+fee|atm\s+fee|maintenance\s+fee|monthly\s+fee|cuota\s+tarjeta|gastos\s+bancarios/],
+    ['Fitness & Sports', /gimnasio|gym\b|fitness|sport\b|deporte|decathlon|sports?\s+club|membership\s+gym|cuota\s+gimnasio/],
+    ['Home & Garden', /garden\s+centre|garden\s+center|jardiner[ií]a|vivero|plantas?\b|maceta|fertilizante|abono\s+plantas|césped|cesped/],
     ['Household', /ikea|leroy merlin|ferreter|hardware|bricolaje/]
   ];
   const direct = rules.find(([,re]) => re.test(s));

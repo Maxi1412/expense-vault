@@ -5,6 +5,7 @@ const CATS_DEFAULT = [
   ['Vehicle','🚗','#6b7b8c'],['Clothing','👕','#d95b9a'],['Shopping','🛍️','#b04fc4'],['Medical','🩺','#e0525e'],
   ['Pharmacy','💊','#2bb5a0'],['Dental','🦷','#4fb3e8'],['Pets','🐾','#a8763e'],['Insurance','🛡️','#3f6fb5'],
   ['Entertainment','🎬','#e05a7a'],['Travel','✈️','#2a9fbf'],['Subscriptions','🔁','#8a6fe0'],['Household','🧽','#7fa33a'],
+  ['Tobacco','🚬','#8b6f5a'],['Banking & Fees','🏦','#60758a'],['Fitness & Sports','🏋️','#3f9f79'],['Home & Garden','🌿','#6f9b55'],
   ['Personal Care','🧴','#e28aa0'],['Gifts','🎁','#e0703a'],['Education','📚','#4a7fd0'],['Other','📦','#8b8f98']
 ].map(([name, icon, color]) => ({ id: name, name, icon, color, custom: false }));
 

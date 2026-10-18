@@ -139,3 +139,13 @@ input[type=color]{padding:5px;height:50px}.rgrid button{min-width:0;overflow:hid
 
 .hero-month-flow{margin-top:12px;font-size:13px;line-height:1.45;color:rgba(255,255,255,.9)}
 .available-total{margin-bottom:12px}
+
+/* Savings Jar */
+.savings-ico{background:var(--acc2)}
+.savings-loc{grid-column:1/-1}
+.savings-total,.savings-amt{font-weight:750}
+.savings-summary{border:1px solid var(--line)}
+.savings-actions .btn{flex:1}
+.jar-context .row{min-height:28px}
+.money-location-grid .savings-loc{background:var(--card)}
+@media(max-width:360px){.savings-loc{grid-column:auto}}

@@ -555,6 +555,7 @@ function filterSheet() {
 }
 function txDetail(id) {
   const t = store.get(id); if (!t) return;
+  if (t.type === 'savings') return savingsDetail(t);
   const url = receiptUrl(t.receiptId), isIncome = t.type === 'income';
   sheet(`<div class="row">${txCatIco(t)}<div class="grow"><h2 style="margin:0">${esc(t.merchant)}</h2><span class="mut">${isIncome ? 'Income · ' : ''}${esc(t.category)}${t.subcategory ? ' · ' + esc(t.subcategory) : ''}</span></div></div><div class="big ${isIncome ? 'income-amt' : ''}" style="margin:12px 0">${isIncome ? '+' : ''}${eur(t.amount)}</div>
   <div class="card">${[['Type', isIncome ? 'Income' : 'Expense'], ['Date', fdl(t.date) + ' · ' + (t.time || '')], [isIncome ? 'Received via' : 'Payment', t.payment], ['Money location', fundLabel(fundOf(t))], ...(isIncome ? [] : (Number(t.receiptTotal || t.amount) !== Number(t.amount) ? [['Receipt total', eur(t.receiptTotal || t.amount)], ['Your share', eur(t.amount)]] : [])), ...(isIncome || !(Number(t.taxTotal || 0) > 0) ? [] : [['Receipt Tax / VAT', eur(t.taxTotal)], ...(Number(t.receiptTotal || t.amount) !== Number(t.amount) ? [['Your VAT share', eur(t.personalTax ?? (Number(t.taxTotal || 0) * Number(t.amount || 0) / Math.max(Number(t.receiptTotal || t.amount), 0.01)))]] : []), ['Tax rate', (t.taxRates || []).length ? t.taxRates.join(', ') + '%' : '—']]), ['Notes', t.notes || '—'], ['Created', fd(t.created.slice(0, 10))], ['Last edited', fd(t.modified.slice(0, 10))]].map(([a, b]) => `<div class="row sp detail-row"><span class="mut">${a}</span><span>${esc(b)}</span></div>`).join('')}</div>
@@ -563,7 +564,7 @@ function txDetail(id) {
 }
 function confirmDel(id) {
   const t = store.get(id); if (!t) return;
-  sheet(`<h2>Delete this transaction?</h2><div class="card"><b>${esc(t.merchant)}</b><div>${eur(t.amount)}</div><div class="mut">${fdl(t.date)}</div></div><div class="btns"><button class="btn ghost" onclick="closeSheet()">Cancel</button><button class="btn del" onclick="deleteTx('${id}')">Delete</button></div>`);
+  sheet(`<h2>Delete this ${t.type==='savings'?'Savings Jar entry':'transaction'}?</h2><div class="card"><b>${esc(t.merchant)}</b><div>${eur(t.amount)}</div><div class="mut">${fdl(t.date)}</div></div><div class="btns"><button class="btn ghost" onclick="closeSheet()">Cancel</button><button class="btn del" onclick="deleteTx('${id}')">Delete</button></div>`);
 }
 async function deleteTx(id) { await store.remove(id); closeSheet(); render(); }
 function rcpView(id) {
@@ -1057,6 +1058,80 @@ async function saveIncome(id) {
     S.mo = monthOffsetForDate(t.date);
     sheet(`<div style="text-align:center;padding:24px 0"><div style="font-size:54px">✓</div><h2>Income saved</h2><p class="income-amt">+${eur(a)} added as ${esc(t.category)}.</p></div><button class="btn" onclick="closeSheet();go('home')">Done</button>`);
   } catch (e) { const err = $('#ierr'); if (err) err.textContent = 'Could not save this income. ' + (e.message || ''); }
+}
+
+/* ---------- savings jar ---------- */
+function savingsJarView() {
+  const l = savingsTransfers(TX).slice().sort((a,b) => b.date.localeCompare(a.date) || String(b.time || '').localeCompare(String(a.time || '')));
+  const jar = savingsBalance(), cash = fundBalance('cash');
+  sheet(`<div class="detail-head"><div><h2 style="margin:0">🪙 Savings Jar</h2><div class="mut">Coins kept aside from spendable cash</div></div></div>
+    <div class="card savings-summary"><span class="mut">In the jar</span><div class="detail-total savings-total">${eur(jar)}</div><div class="mut">Cash available: ${eur(cash)}</div></div>
+    <div class="btns savings-actions"><button class="btn" onclick="savingsForm(null,'deposit')">Add coins</button><button class="btn sec" ${jar > 0 ? '' : 'disabled'} onclick="savingsForm(null,'withdrawal')">Take from jar</button></div>
+    <div class="card detail-list" style="margin-top:14px">${l.map(txRow).join('') || empty('🪙','Your jar is empty','Add your first coins to start tracking the jar.')}</div>`, true);
+}
+
+function savingsForm(id, direction = 'deposit') {
+  const old = id ? store.get(id) : null;
+  const t = old || { direction, date:TODAY, time:new Date().toTimeString().slice(0,5), amount:'', notes:'' };
+  const dir = t.direction === 'withdrawal' ? 'withdrawal' : 'deposit';
+  const base = TX.filter(x => x.id !== id);
+  const jarBefore = savingsBalance(base), cashBefore = fundBalance('cash', base);
+  sheet(`<h2>${id ? 'Edit Savings Jar entry' : dir === 'withdrawal' ? 'Take from Savings Jar' : 'Add to Savings Jar'}</h2>
+    <div class="card jar-context"><div class="row sp"><span class="mut">Savings Jar</span><b>${eur(jarBefore)}</b></div><div class="row sp" style="margin-top:8px"><span class="mut">Cash available</span><b>${eur(cashBefore)}</b></div></div>
+    <label for="sdir">Action</label><select id="sdir"><option value="deposit" ${dir==='deposit'?'selected':''}>Put cash into jar</option><option value="withdrawal" ${dir==='withdrawal'?'selected':''}>Take cash out of jar</option></select>
+    <label for="sa">Amount</label><input id="sa" class="amt-in" type="number" inputmode="decimal" step="0.01" min="0.01" placeholder="0.00" value="${t.amount ?? ''}">
+    <div class="grid2"><div><label for="sdate">Date</label><input id="sdate" type="date" value="${t.date || TODAY}"></div><div><label for="stime">Time</label><input id="stime" type="time" value="${esc(t.time || '')}"></div></div>
+    <label for="snotes">Notes (optional)</label><textarea id="snotes" rows="2" placeholder="e.g. Coins from change">${esc(t.notes || '')}</textarea>
+    <p class="mut">This is a transfer between your Cash and Savings Jar. It is not counted as income or an expense.</p>
+    <p id="serr" class="up" role="alert"></p>
+    <button class="btn" onclick="saveSavings('${id || ''}')">${id ? 'Save changes' : 'Save Jar Entry'}</button>`, true);
+}
+
+async function saveSavings(id) {
+  const amount = parseFloat($('#sa')?.value), direction = $('#sdir')?.value === 'withdrawal' ? 'withdrawal' : 'deposit';
+  if (!(amount > 0)) { $('#serr').textContent = 'Enter an amount greater than zero.'; return; }
+  const old = id ? store.get(id) : null;
+  const base = TX.filter(x => x.id !== id);
+  const jarBefore = savingsBalance(base), cashBefore = fundBalance('cash', base);
+  if (direction === 'withdrawal' && amount > jarBefore + 0.0001) {
+    $('#serr').textContent = 'That is more than the amount currently in your Savings Jar.'; return;
+  }
+  if (direction === 'deposit' && amount > cashBefore + 0.0001) {
+    $('#serr').textContent = 'That is more than your currently recorded Cash balance.'; return;
+  }
+  const now = new Date().toISOString();
+  const t = {
+    id: id || uid('s'), type:'savings', direction,
+    date: $('#sdate')?.value || TODAY,
+    time: $('#stime')?.value || old?.time || new Date().toTimeString().slice(0,5),
+    merchant:'Savings Jar', amount, category:'Savings Jar',
+    subcategory: direction === 'withdrawal' ? 'Jar → Cash' : 'Cash → Jar',
+    payment:'Cash', fund:'cash', notes:$('#snotes')?.value.trim() || '',
+    receiptId:null, ocrText:'', created:old?.created || now, modified:now
+  };
+  try {
+    await store.save(t);
+    S.mo = monthOffsetForDate(t.date);
+    sheet(`<div style="text-align:center;padding:24px 0"><div style="font-size:54px">🪙</div><h2>${direction==='withdrawal'?'Cash returned from jar':'Savings Jar updated'}</h2><p>${direction==='withdrawal'?'Returned':'Saved'} ${eur(amount)}.</p><p class="mut">Jar balance: ${eur(savingsBalance())} · Cash: ${eur(fundBalance('cash'))}</p></div><button class="btn" onclick="closeSheet();go('home')">Done</button>`);
+  } catch (e) {
+    const err=$('#serr'); if(err) err.textContent='Could not save this jar entry. '+(e.message||'');
+  }
+}
+
+function savingsDetail(t) {
+  const dep = t.direction !== 'withdrawal';
+  sheet(`<div class="row">${txCatIco(t)}<div class="grow"><h2 style="margin:0">Savings Jar</h2><span class="mut">${dep?'Cash → Jar':'Jar → Cash'}</span></div></div>
+    <div class="big savings-total" style="margin:12px 0">${eur(t.amount)}</div>
+    <div class="card">${[
+      ['Type','Savings transfer'],
+      ['Direction',dep?'Put cash into jar':'Take cash out of jar'],
+      ['Date',fdl(t.date)+' · '+(t.time||'')],
+      ['From / To',dep?'Cash → Savings Jar':'Savings Jar → Cash'],
+      ['Notes',t.notes||'—'],
+      ['Created',fd(t.created.slice(0,10))],
+      ['Last edited',fd(t.modified.slice(0,10))]
+    ].map(([a,b])=>`<div class="row sp detail-row"><span class="mut">${a}</span><span>${esc(b)}</span></div>`).join('')}</div>
+    <div class="btns"><button class="btn sec" onclick="savingsForm('${t.id}','${dep?'deposit':'withdrawal'}')">Edit</button><button class="btn del" onclick="confirmDel('${t.id}')">Delete</button></div>`, true);
 }
 
 /* ---------- global search ---------- */

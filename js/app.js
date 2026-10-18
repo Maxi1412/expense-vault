@@ -39,12 +39,20 @@ const fdl = s => D(s).toLocaleDateString('en-GB', { day: 'numeric', month: 'long
 const sum = l => l.reduce((a, t) => a + Number(t.amount || 0), 0);
 const expenses = l => l.filter(t => (t.type || 'expense') === 'expense');
 const incomes = l => l.filter(t => t.type === 'income');
+const savingsTransfers = l => l.filter(t => t.type === 'savings');
 const expenseSum = l => sum(expenses(l));
 const incomeSum = l => sum(incomes(l));
+const savingsBalance = (list = TX) => savingsTransfers(list).reduce((total, t) => total + (t.direction === 'withdrawal' ? -1 : 1) * Number(t.amount || 0), 0);
 const fundFromPayment = payment => String(payment || '').toLowerCase() === 'cash' ? 'cash' : 'card';
 const fundOf = t => t?.fund === 'cash' || t?.fund === 'card' ? t.fund : fundFromPayment(t?.payment);
 const fundLabel = fund => fund === 'cash' ? 'Cash' : 'Bank / Card';
-const fundBalance = (fund, list = TX) => list.filter(t => fundOf(t) === fund).reduce((total, t) => total + ((t.type === 'income' ? 1 : -1) * Number(t.amount || 0)), 0);
+const fundBalance = (fund, list = TX) => list.filter(t => fundOf(t) === fund).reduce((total, t) => {
+  const a = Number(t.amount || 0);
+  if (t.type === 'income') return total + a;
+  if ((t.type || 'expense') === 'expense') return total - a;
+  if (t.type === 'savings' && fund === 'cash') return total + (t.direction === 'withdrawal' ? a : -a);
+  return total;
+}, 0);
 function syncFundFromPayment(payId, fundId) {
   const pay = $('#' + payId), fund = $('#' + fundId);
   if (pay && fund) fund.value = fundFromPayment(pay.value);
@@ -52,7 +60,7 @@ function syncFundFromPayment(payId, fundId) {
 const eur = n => new Intl.NumberFormat('en-IE', { style: 'currency', currency: PROFILE.currency || 'EUR' }).format(Number(n || 0));
 const cat = n => CATS.find(c => c.name === n) || CATS.find(c => c.name === 'Other') || { name: n || 'Other', icon: '📦', color: '#8b8f98' };
 const incomeCat = n => INCOME_CATS.find(c => c.name === n) || INCOME_CATS.find(c => c.name === 'Other Income') || { name: n || 'Other Income', icon: '＋', color: '#1f9d63' };
-const txCat = t => t?.type === 'income' ? incomeCat(t.category) : cat(t?.category);
+const txCat = t => t?.type === 'income' ? incomeCat(t.category) : t?.type === 'savings' ? { name:'Savings Jar', icon:'🪙', color:'#d49b2a' } : cat(t?.category);
 const monthKey = off => { const d = D(TODAY); d.setDate(1); d.setMonth(d.getMonth() + off); return ds(d).slice(0, 7); };
 const monthName = k => D(k + '-01').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
 const monthOffsetForDate = date => {
@@ -347,13 +355,14 @@ function fundActivity(fund) {
 }
 
 function availableMoneyOverview() {
-  const card = fundBalance('card'), cash = fundBalance('cash'), total = card + cash;
+  const card = fundBalance('card'), cash = fundBalance('cash'), jar = savingsBalance(), total = card + cash;
   const recent = TX.slice().sort((a,b) => b.date.localeCompare(a.date) || String(b.time || '').localeCompare(String(a.time || ''))).slice(0,10);
   sheet(`<div class="detail-head"><div><h2 style="margin:0">Available money</h2><div class="mut">Current balance across all recorded transactions</div></div></div>
-    <div class="card available-total"><span class="mut">Total available</span><div class="detail-total ${total >= 0 ? 'income-amt' : 'up'}">${eur(total)}</div></div>
+    <div class="card available-total"><span class="mut">Total available to spend</span><div class="detail-total ${total >= 0 ? 'income-amt' : 'up'}">${eur(total)}</div><div class="mut">Total including Savings Jar: ${eur(total + jar)}</div></div>
     <div class="money-location-grid" style="margin-bottom:14px">
       <button onclick="fundActivity('card')"><span class="money-loc-icon">💳</span><span class="mut">Bank / Card</span><b>${eur(card)}</b><span class="tap-more">View activity ›</span></button>
       <button onclick="fundActivity('cash')"><span class="money-loc-icon">💶</span><span class="mut">Cash</span><b>${eur(cash)}</b><span class="tap-more">View activity ›</span></button>
+      <button class="savings-loc" onclick="savingsJarView()"><span class="money-loc-icon">🪙</span><span class="mut">Savings Jar</span><b>${eur(jar)}</b><span class="tap-more">View jar ›</span></button>
     </div>
     <div class="card"><div class="row sp"><h2>Recent activity</h2><button class="detail-link" onclick="closeSheet();go('tx')">See all ›</button></div>${recent.map(txRow).join('') || '<p class="mut">No activity yet.</p>'}</div>`, true);
 }
@@ -394,7 +403,13 @@ function closeSheet() { const s = $('#sheet'); if (s) s.classList.remove('open')
 document.addEventListener('click', e => { if (e.target?.id === 'sheet') closeSheet(); });
 const back = t => `<div class="row" style="margin-bottom:8px"><button class="icon-btn" aria-label="Back" onclick="go('more')">←</button><h1 style="margin:0">${esc(t)}</h1></div>`;
 const empty = (e, t, m, b, a) => `<div class="empty"><div class="e">${e}</div><h3>${esc(t)}</h3><p>${esc(m)}</p>${b ? `<button class="btn" style="max-width:260px" onclick="${a}">${esc(b)}</button>` : ''}</div>`;
-const txRow = t => `<button class="item" onclick="txDetail('${t.id}')">${txCatIco(t)}<div class="grow"><b>${esc(t.merchant)}</b><div class="mut">${t.type === 'income' ? 'Income · ' : ''}${esc(t.category)} · ${fundLabel(fundOf(t))} · ${fd(t.date)} ${t.receiptId ? '· 📎' : ''}</div></div><span class="amt ${t.type === 'income' ? 'income-amt' : ''}">${t.type === 'income' ? '+' : ''}${eur(t.amount)}</span></button>`;
+const txRow = t => {
+  if (t.type === 'savings') {
+    const dep = t.direction !== 'withdrawal';
+    return `<button class="item" onclick="txDetail('${t.id}')">${txCatIco(t)}<div class="grow"><b>Savings Jar</b><div class="mut">${dep ? 'Cash → Jar' : 'Jar → Cash'} · ${fd(t.date)}</div></div><span class="amt savings-amt">${dep ? '→ ' : '← '}${eur(t.amount)}</span></button>`;
+  }
+  return `<button class="item" onclick="txDetail('${t.id}')">${txCatIco(t)}<div class="grow"><b>${esc(t.merchant)}</b><div class="mut">${t.type === 'income' ? 'Income · ' : ''}${esc(t.category)} · ${fundLabel(fundOf(t))} · ${fd(t.date)} ${t.receiptId ? '· 📎' : ''}</div></div><span class="amt ${t.type === 'income' ? 'income-amt' : ''}">${t.type === 'income' ? '+' : ''}${eur(t.amount)}</span></button>`;
+};
 
 function detailList(title, list, opts = {}) {
   const sorted = list.slice().sort((a,b) => b.date.localeCompare(a.date) || String(b.time || '').localeCompare(String(a.time || '')));
@@ -470,7 +485,7 @@ function dailySpendingBreakdown(key) {
 /* ---------- home ---------- */
 function home() {
   const k = monthKey(S.mo), cur = S.mo === 0, l = inMonth(k), out = expenseSum(l), inc = incomeSum(l), monthlyNet = inc - out, budget = Number(SETTINGS.monthlyBudget || 0), rem = budget - out;
-  const cardAvailable = fundBalance('card'), cashAvailable = fundBalance('cash'), totalAvailable = cardAvailable + cashAvailable;
+  const cardAvailable = fundBalance('card'), cashAvailable = fundBalance('cash'), jarSaved = savingsBalance(), totalAvailable = cardAvailable + cashAvailable;
   const days = cur ? Math.max(1, +TODAY.slice(8)) : new Date(+k.slice(0, 4), +k.slice(5), 0).getDate();
   const pk = monthKey(S.mo - 1), pl = expenses(inMonth(pk)).filter(t => +t.date.slice(8) <= days), ps = sum(pl), ch = ps ? (out - ps) / ps * 100 : 0;
   const wk = between(add(TODAY, -6), TODAY), dim = new Date(+k.slice(0, 4), +k.slice(5), 0).getDate();
@@ -489,6 +504,7 @@ function home() {
     <div class="money-location-grid">
       <button onclick="fundActivity('card')"><span class="money-loc-icon">💳</span><span class="mut">Bank / Card</span><b>${eur(fundBalance('card'))}</b><span class="tap-more">View activity ›</span></button>
       <button onclick="fundActivity('cash')"><span class="money-loc-icon">💶</span><span class="mut">Cash</span><b>${eur(fundBalance('cash'))}</b><span class="tap-more">View activity ›</span></button>
+      <button class="savings-loc" onclick="savingsJarView()"><span class="money-loc-icon">🪙</span><span class="mut">Savings Jar</span><b>${eur(jarSaved)}</b><span class="tap-more">Manage jar ›</span></button>
     </div>
   </div>
   <div class="grid2">${cur ? `<button class="card stat tap-card" onclick="drillPeriod('expense',TODAY,TODAY,'Today’s expenses')"><span class="mut">Today spent</span><b>${eur(expenseSum(TX.filter(t => t.date === TODAY)))}</b><span class="tap-more">View details ›</span></button><button class="card stat tap-card" onclick="drillPeriod('expense',add(TODAY,-6),TODAY,'This week’s expenses')"><span class="mut">This week spent</span><b>${eur(expenseSum(wk))}</b><span class="tap-more">View details ›</span></button>` : `<button class="card stat tap-card" onclick="drillMonth('expense','${k}','Expenses · ${monthName(k)}')"><span class="mut">Average per day</span><b>${eur(out / Math.max(1, dim))}</b><span class="tap-more">View details ›</span></button><button class="card stat tap-card" onclick="drillMonth('all','${k}','Activity · ${monthName(k)}')"><span class="mut">Transactions</span><b>${l.length}</b><span class="tap-more">View activity ›</span></button>`}
@@ -531,7 +547,7 @@ function clearF() { S.f = { type: '', cat: '', pay: '', min: '', max: '', sort: 
 function customSheet() { sheet(`<h2>Custom dates</h2><label for="cf">From</label><input type="date" id="cf" value="${S.from || TODAY.slice(0, 8) + '01'}"><label for="ct">To</label><input type="date" id="ct" value="${S.to || TODAY}"><button class="btn" style="margin-top:16px" onclick="S.from=$('#cf').value;S.to=$('#ct').value;closeSheet();render()">Apply</button>`); }
 function filterSheet() {
   const f = S.f, o = (a, v) => a.map(x => `<option value="${esc(x)}" ${x === v ? 'selected' : ''}>${esc(x)}</option>`).join('');
-  sheet(`<h2>Filters</h2><label for="ftype">Type</label><select id="ftype"><option value="">All</option><option value="expense" ${f.type==='expense'?'selected':''}>Expenses</option><option value="income" ${f.type==='income'?'selected':''}>Income</option></select><label for="fc">Category</label><select id="fc"><option value="">All</option>${o([...CATS.map(c => c.name), ...INCOME_CATS.map(c => c.name)], f.cat)}</select>
+  sheet(`<h2>Filters</h2><label for="ftype">Type</label><select id="ftype"><option value="">All</option><option value="expense" ${f.type==='expense'?'selected':''}>Expenses</option><option value="income" ${f.type==='income'?'selected':''}>Income</option><option value="savings" ${f.type==='savings'?'selected':''}>Savings Jar</option></select><label for="fc">Category</label><select id="fc"><option value="">All</option>${o([...CATS.map(c => c.name), ...INCOME_CATS.map(c => c.name)], f.cat)}</select>
   <label for="fp">Payment method</label><select id="fp"><option value="">All</option>${o(PAYMENTS, f.pay)}</select>
   <div class="grid2"><div><label for="fmin">Min amount</label><input id="fmin" type="number" inputmode="decimal" value="${f.min}"></div><div><label for="fmax">Max amount</label><input id="fmax" type="number" inputmode="decimal" value="${f.max}"></div></div>
   <label for="fs">Sort by</label><select id="fs">${[['new', 'Newest first'], ['old', 'Oldest first'], ['high', 'Highest amount'], ['low', 'Lowest amount']].map(([k, n]) => `<option value="${k}" ${f.sort === k ? 'selected' : ''}>${n}</option>`).join('')}</select>
@@ -565,6 +581,7 @@ function toast(m) { sheet(`<h2>${esc(m)}</h2><button class="btn" onclick="closeS
 function addChoose() {
   draft = null;
   sheet(`<h2>Add transaction</h2><button class="choice" onclick="incomeForm()"><span class="ico" style="background:#1f9d6322">💶</span><span><b>Add Income</b><br><span class="mut">Salary, tips, private work or other income</span></span></button>
+  <button class="choice" onclick="savingsForm()"><span class="ico savings-ico">🪙</span><span><b>Savings Jar</b><br><span class="mut">Move coins from Cash into your savings jar</span></span></button>
   <button class="choice" onclick="pick('photo')"><span class="ico" style="background:var(--acc2)">📷</span><span><b>Take Photo</b><br><span class="mut">Snap an expense receipt or invoice</span></span></button>
   <button class="choice" onclick="pick('upload')"><span class="ico" style="background:var(--acc2)">🖼️</span><span><b>Upload Receipt</b><br><span class="mut">Choose an existing expense image</span></span></button>
   <button class="choice" onclick="txForm()"><span class="ico" style="background:var(--acc2)">✏️</span><span><b>Manual Expense</b><br><span class="mut">No receipt? Enter it quickly</span></span></button>`);
@@ -939,6 +956,7 @@ function setMyShare(fraction) {
 }
 function txForm(id, d) {
   if (id && store.get(id)?.type === 'income') return incomeForm(id, store.get(id));
+  if (id && store.get(id)?.type === 'savings') return savingsForm(id, store.get(id)?.direction || 'deposit');
   const t = id ? store.get(id) : d || { date: TODAY, payment: 'Debit Card', fund: 'card', category: 'Groceries', notes: '', subcategory: '' };
   t.fund = fundOf(t);
   const o = (a, v) => a.map(x => `<option value="${esc(x)}" ${x === v ? 'selected' : ''}>${esc(x)}</option>`).join('');

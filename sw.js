@@ -1,4 +1,4 @@
-const CACHE = 'expense-vault-v23';
+const CACHE = 'expense-vault-v24';
 const APP_SHELL = [
   './', './index.html', './css/styles.css', './js/data.js', './js/db.js', './js/app.js',
   './manifest.webmanifest', './icons/icon.svg'
@@ -12,8 +12,12 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(() => self.clients.claim())
   );
-  self.clients.claim();
+});
+
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('fetch', event => {
@@ -21,7 +25,21 @@ self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
 
   if (url.pathname.endsWith('/expense-vault/google-calendar-connect.html')) {
-    event.respondWith(fetch(event.request));
+    event.respondWith((async () => {
+      try {
+        const response = await fetch(event.request, { cache: 'no-store' });
+        const headers = new Headers(response.headers);
+        headers.set('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+        headers.set('X-Max-Planner-Calendar-Auth', 'coop-v1');
+        return new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers
+        });
+      } catch (_) {
+        return Response.error();
+      }
+    })());
     return;
   }
 

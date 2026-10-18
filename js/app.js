@@ -418,6 +418,10 @@ function detailList(title, list, opts = {}) {
   const rows = sorted.map(t => {
     const dateHead = !singleDay && t.date !== last ? `<div class="detail-date">${fdl(t.date)}</div>` : '';
     last = t.date;
+    if (t.type === 'savings') {
+      const dep = t.direction !== 'withdrawal';
+      return dateHead + `<button class="detail-item" onclick="txDetail('${t.id}')">${txCatIco(t)}<div class="grow"><b>Savings Jar</b><div class="mut">${dep ? 'Cash → Jar' : 'Jar → Cash'}${t.time ? ' · ' + esc(t.time) : ''}</div></div><span class="amt savings-amt">${dep ? '→ ' : '← '}${eur(t.amount)}</span></button>`;
+    }
     return dateHead + `<button class="detail-item" onclick="txDetail('${t.id}')">${txCatIco(t)}<div class="grow"><b>${esc(t.merchant)}</b><div class="mut">${esc(t.category)}${t.subcategory ? ' · ' + esc(t.subcategory) : ''}${t.time ? ' · ' + esc(t.time) : ''}${t.receiptId ? ' · 📎' : ''}</div></div><span class="amt ${t.type === 'income' ? 'income-amt' : ''}">${t.type === 'income' ? '+' : ''}${eur(t.amount)}</span></button>`;
   }).join('');
   const summary = opts.type === 'income'
@@ -538,7 +542,7 @@ function txView() {
   const rows = l.slice(0, 120).map(t => { const h = t.date !== last ? `<div class="mut date-group">${fdl(t.date)}</div>` : ''; last = t.date; return h + txRow(t); }).join('');
   return `<h1>Transactions</h1><input type="search" id="q" placeholder="Search merchant, category, notes" aria-label="Search transactions" value="${esc(S.q)}" oninput="S.q=this.value;liveTx()">
   <div class="chips" style="margin-top:10px">${[['all', 'All'], ['today', 'Today'], ['week', 'This week'], ['month', 'This month'], ['custom', 'Custom']].map(([k, n]) => `<button class="pill ${S.range === k ? 'on' : ''}" onclick="setRange('${k}')">${n}</button>`).join('')}<button class="pill ${af ? 'on' : ''}" onclick="filterSheet()">Filters${af ? ' (' + af + ')' : ''}</button></div>
-  <div class="row sp mut" style="margin-bottom:6px"><span>${l.length} results · In ${eur(incomeSum(l))} · Out ${eur(expenseSum(l))}</span></div>
+  <div class="row sp mut" style="margin-bottom:6px"><span>${l.length} results · In ${eur(incomeSum(l))} · Out ${eur(expenseSum(l))}${savingsTransfers(l).length ? ' · Jar Δ ' + eur(savingsBalance(l)) : ''}</span></div>
   <div class="card" id="txl">${rows || empty('🔎', 'No transactions match these filters', 'Try removing a filter.', 'Clear filters', 'clearF()')}</div>`;
 }
 function liveTx() { const p = $('#q'), pos = p.selectionStart; render(); const n = $('#q'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }
@@ -1325,15 +1329,15 @@ async function resetLocalData() {
   await reloadData(); await refreshSafetyStatus(); closeSheet(); go('home'); toast('Local data erased. Expense Vault is ready for a fresh start.');
 }
 function exportCsv() {
-  const rows = [['ID', 'Type', 'Date', 'Time', 'Merchant / Source', 'My Amount', 'Receipt Total', 'My Subtotal', 'Receipt Tax / VAT', 'My VAT Share', 'Tax rate(s)', 'Category', 'Subcategory', 'Payment / Received via', 'Money Location', 'Notes'], ...TX.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(t => [t.id, t.type || 'expense', t.date, t.time, t.merchant, t.amount, t.type === 'income' ? '' : (t.receiptTotal ?? t.amount), t.type === 'income' ? '' : (t.subtotal ?? ''), t.type === 'income' ? '' : (t.taxTotal || ''), t.type === 'income' ? '' : (t.personalTax || ''), t.type === 'income' ? '' : ((t.taxRates || []).join(', ')), t.category, t.subcategory || '', t.payment, fundLabel(fundOf(t)), t.notes || ''])];
+  const rows = [['ID', 'Type', 'Direction', 'Date', 'Time', 'Merchant / Source', 'My Amount', 'Receipt Total', 'My Subtotal', 'Receipt Tax / VAT', 'My VAT Share', 'Tax rate(s)', 'Category', 'Subcategory', 'Payment / Received via', 'Money Location', 'Notes'], ...TX.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(t => [t.id, t.type || 'expense', t.type === 'savings' ? (t.direction || 'deposit') : '', t.date, t.time, t.merchant, t.amount, t.type === 'expense' ? (t.receiptTotal ?? t.amount) : '', t.type === 'expense' ? (t.subtotal ?? '') : '', t.type === 'expense' ? (t.taxTotal || '') : '', t.type === 'expense' ? (t.personalTax || '') : '', t.type === 'expense' ? ((t.taxRates || []).join(', ')) : '', t.category, t.subcategory || '', t.payment, t.type === 'savings' ? 'Cash ↔ Savings Jar' : fundLabel(fundOf(t)), t.notes || ''])];
   const csv = rows.map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n'); downloadBlob(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }), `expenses-${TODAY}.csv`);
 }
 async function exportExcel() {
   try {
     await loadScript('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js', 'XLSX');
-    const txRows = TX.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(t => ({ Type: t.type || 'expense', Date: t.date, Time: t.time, 'Merchant / Source': t.merchant, 'My Amount': t.amount, 'Receipt Total': t.type === 'income' ? '' : (t.receiptTotal ?? t.amount), 'My Subtotal': t.type === 'income' ? '' : (t.subtotal ?? ''), 'Receipt Tax / VAT': t.type === 'income' ? '' : (t.taxTotal || ''), 'My VAT Share': t.type === 'income' ? '' : (t.personalTax || ''), 'Tax rate(s)': t.type === 'income' ? '' : ((t.taxRates || []).join(', ')), Category: t.category, Subcategory: t.subcategory || '', 'Payment / Received via': t.payment, 'Money Location': fundLabel(fundOf(t)), Notes: t.notes || '', Attachment: t.receiptId ? 'Yes' : 'No' }));
+    const txRows = TX.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(t => ({ Type: t.type || 'expense', Direction: t.type === 'savings' ? (t.direction || 'deposit') : '', Date: t.date, Time: t.time, 'Merchant / Source': t.merchant, 'My Amount': t.amount, 'Receipt Total': t.type === 'expense' ? (t.receiptTotal ?? t.amount) : '', 'My Subtotal': t.type === 'expense' ? (t.subtotal ?? '') : '', 'Receipt Tax / VAT': t.type === 'expense' ? (t.taxTotal || '') : '', 'My VAT Share': t.type === 'expense' ? (t.personalTax || '') : '', 'Tax rate(s)': t.type === 'expense' ? ((t.taxRates || []).join(', ')) : '', Category: t.category, Subcategory: t.subcategory || '', 'Payment / Received via': t.payment, 'Money Location': t.type === 'savings' ? 'Cash ↔ Savings Jar' : fundLabel(fundOf(t)), Notes: t.notes || '', Attachment: t.receiptId ? 'Yes' : 'No' }));
     const months = [...new Set(TX.map(t => t.date.slice(0,7)))].sort();
-    const summary = months.map(m => ({ Month: monthName(m), Income: incomeSum(inMonth(m)), Expenses: expenseSum(inMonth(m)), Balance: incomeSum(inMonth(m)) - expenseSum(inMonth(m)), Transactions: inMonth(m).length }));
+    const summary = months.map(m => ({ Month: monthName(m), Income: incomeSum(inMonth(m)), Expenses: expenseSum(inMonth(m)), Balance: incomeSum(inMonth(m)) - expenseSum(inMonth(m)), 'Savings Jar Change': savingsBalance(inMonth(m)), Transactions: inMonth(m).length }));
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(txRows), 'Transactions'); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), 'Monthly Summary'); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ACCOUNTS.map(a => ({ Name:a.name, Type:a.type, Balance:a.balance, 'Updated at':a.updatedAt || '' }))), 'Accounts'); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([...CATS.map(c => ({ Type: 'Expense', Category: c.name })), ...INCOME_CATS.map(c => ({ Type: 'Income', Category: c.name }))]), 'Categories');
     XLSX.writeFile(wb, `expenses-${TODAY}.xlsx`);
   } catch (e) { toast('Excel export could not load. CSV export is available offline.'); }

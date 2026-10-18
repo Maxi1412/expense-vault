@@ -57,6 +57,7 @@
       return false;
     }
     try{
+      setStatus('Preparing secure Google sign-in…');
       const reg=await navigator.serviceWorker.register('./sw.js');
       await reg.update().catch(()=>{});
       if(reg.waiting) reg.waiting.postMessage({type:'SKIP_WAITING'});
@@ -66,19 +67,31 @@
           let done=false;
           const finish=()=>{if(done)return;done=true;resolve();};
           navigator.serviceWorker.addEventListener('controllerchange',finish,{once:true});
-          setTimeout(finish,1800);
+          setTimeout(finish,2200);
         });
-        if(!sessionStorage.getItem('maxPlannerCoopReloaded')){
-          sessionStorage.setItem('maxPlannerCoopReloaded','1');
-          location.reload();
-          return false;
-        }
+        location.reload();
+        return false;
       }
 
-      // Force a controlled second navigation after an SW update so the top-level
-      // document itself receives the COOP header required by Google popups.
-      if(!sessionStorage.getItem('maxPlannerCoopConfirmed')){
-        sessionStorage.setItem('maxPlannerCoopConfirmed','1');
+      // Verify that the currently active worker is the COOP-aware version.
+      const probe=await fetch('./google-calendar-connect.html?coop_probe='+Date.now(),{cache:'no-store'});
+      const coopMarker=probe.headers.get('X-Max-Planner-Calendar-Auth')||'';
+      const coopHeader=probe.headers.get('Cross-Origin-Opener-Policy')||'';
+      if(coopMarker!=='coop-v1'||coopHeader!=='same-origin-allow-popups'){
+        if(reg.waiting) reg.waiting.postMessage({type:'SKIP_WAITING'});
+        await new Promise(resolve=>{
+          let done=false;
+          const finish=()=>{if(done)return;done=true;resolve();};
+          navigator.serviceWorker.addEventListener('controllerchange',finish,{once:true});
+          setTimeout(finish,2200);
+        });
+        location.reload();
+        return false;
+      }
+
+      // The document itself must also be loaded through that worker, not only a probe.
+      if(!sessionStorage.getItem('maxPlannerCoopDocumentV1')){
+        sessionStorage.setItem('maxPlannerCoopDocumentV1','1');
         location.reload();
         return false;
       }

@@ -40,6 +40,7 @@
   const btn=document.getElementById('connectBtn');
   const status=document.getElementById('status');
   let tokenClient=null;
+  let swReady=false;
 
   function setStatus(text,kind=''){
     status.textContent=text;
@@ -50,7 +51,51 @@
   }
   document.getElementById('backBtn').onclick=goBack;
 
-  function init(){
+  async function prepareAuthPage(){
+    if(!('serviceWorker' in navigator)){
+      setStatus('This browser does not support the required Google sign-in preparation.','err');
+      return false;
+    }
+    try{
+      const reg=await navigator.serviceWorker.register('./sw.js');
+      await reg.update().catch(()=>{});
+      if(reg.waiting) reg.waiting.postMessage({type:'SKIP_WAITING'});
+
+      if(!navigator.serviceWorker.controller){
+        await new Promise(resolve=>{
+          let done=false;
+          const finish=()=>{if(done)return;done=true;resolve();};
+          navigator.serviceWorker.addEventListener('controllerchange',finish,{once:true});
+          setTimeout(finish,1800);
+        });
+        if(!sessionStorage.getItem('maxPlannerCoopReloaded')){
+          sessionStorage.setItem('maxPlannerCoopReloaded','1');
+          location.reload();
+          return false;
+        }
+      }
+
+      // Force a controlled second navigation after an SW update so the top-level
+      // document itself receives the COOP header required by Google popups.
+      if(!sessionStorage.getItem('maxPlannerCoopConfirmed')){
+        sessionStorage.setItem('maxPlannerCoopConfirmed','1');
+        location.reload();
+        return false;
+      }
+
+      swReady=true;
+      return true;
+    }catch(e){
+      setStatus('Could not prepare secure Google sign-in. '+String(e?.message||e),'err');
+      return false;
+    }
+  }
+
+  async function init(){
+    if(!swReady){
+      const ok=await prepareAuthPage();
+      if(!ok) return;
+    }
     if(!window.google?.accounts?.oauth2){
       setTimeout(init,100);
       return;
@@ -100,6 +145,7 @@
     });
     btn.disabled=false;
     btn.textContent=choose?'Choose Google account':'Continue with Martina';
+    setStatus('Google sign-in is ready.','ok');
     btn.onclick=()=>{
       setStatus('Opening Google sign-in…');
       const request={prompt:choose?'select_account consent':'consent'};

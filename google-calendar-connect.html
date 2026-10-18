@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Connect Mum Google Calendar</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#17332d;background:#f6f3ec}
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px}
+    .card{width:min(520px,100%);background:white;border:1px solid #ddd7cb;border-radius:20px;padding:24px;box-shadow:0 14px 40px rgba(0,0,0,.08)}
+    h1{font-size:24px;margin:0 0 10px}
+    p{line-height:1.45;margin:8px 0 18px;color:#52605c}
+    button{width:100%;border:1px solid #1d4e46;background:#1d4e46;color:white;border-radius:14px;padding:15px 16px;font-size:17px;font-weight:700}
+    button.secondary{margin-top:12px;background:white;color:#1d4e46}
+    button:disabled{opacity:.55}
+    #status{margin-top:16px;font-size:14px;white-space:pre-line}
+    .ok{color:#176b4a}.err{color:#9e2835}
+  </style>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+  <main class="card">
+    <h1>Connect Mum Google Calendar</h1>
+    <p id="intro">Use Martina Scheurer's Google account to give Max Planner read-only Calendar access.</p>
+    <button id="connectBtn" disabled>Preparing Google sign-in…</button>
+    <button id="backBtn" class="secondary" type="button">Back to Max Planner</button>
+    <div id="status"></div>
+  </main>
+<script>
+(() => {
+  const CLIENT_ID='472362575652-33sufdi0inj2kljqrg81587vq7c15fhc.apps.googleusercontent.com';
+  const SCOPE='https://www.googleapis.com/auth/calendar.readonly';
+  const MUM_EMAIL='martina.orihuela@gmail.com';
+  const HANDOFF_KEY='max-planner-google-calendar-handoff-v1';
+  const CHANNEL='max-planner-google-calendar-auth';
+  const PLANNER='https://maxi1412.github.io/max-planner/';
+  const params=new URLSearchParams(location.search);
+  const choose=params.get('mode')==='choose';
+  const btn=document.getElementById('connectBtn');
+  const status=document.getElementById('status');
+  let tokenClient=null;
+
+  function setStatus(text,kind=''){
+    status.textContent=text;
+    status.className=kind;
+  }
+  function goBack(){
+    location.href=PLANNER+'?gcal_auth_return=1';
+  }
+  document.getElementById('backBtn').onclick=goBack;
+
+  function init(){
+    if(!window.google?.accounts?.oauth2){
+      setTimeout(init,100);
+      return;
+    }
+    tokenClient=google.accounts.oauth2.initTokenClient({
+      client_id:CLIENT_ID,
+      scope:SCOPE,
+      callback:(resp)=>{
+        if(resp?.error){
+          setStatus(resp.error_description||resp.error,'err');
+          return;
+        }
+        if(!resp?.access_token){
+          setStatus('Google did not return an access token.','err');
+          return;
+        }
+        if(!google.accounts.oauth2.hasGrantedAllScopes(resp,SCOPE)){
+          setStatus('Calendar read permission was not granted.','err');
+          return;
+        }
+        const payload={
+          token:resp.access_token,
+          expiry:Date.now()+Math.max(0,Number(resp.expires_in||3600)-60)*1000,
+          email:MUM_EMAIL,
+          createdAt:new Date().toISOString()
+        };
+        try{localStorage.setItem(HANDOFF_KEY,JSON.stringify(payload));}catch(e){}
+        try{
+          const ch=new BroadcastChannel(CHANNEL);
+          ch.postMessage({type:'token-ready'});
+          ch.close();
+        }catch(e){}
+        setStatus('✓ Google Calendar authorized. Returning to Max Planner…','ok');
+        btn.disabled=true;
+        setTimeout(goBack,700);
+      },
+      error_callback:(err)=>{
+        const type=String(err?.type||'');
+        if(type==='popup_failed_to_open'){
+          setStatus('Google sign-in could not open in this browser.','err');
+        }else if(type==='popup_closed'){
+          setStatus('Google sign-in was closed before authorization finished.','err');
+        }else{
+          setStatus('Google sign-in could not start.','err');
+        }
+      }
+    });
+    btn.disabled=false;
+    btn.textContent=choose?'Choose Google account':'Continue with Martina';
+    btn.onclick=()=>{
+      setStatus('Opening Google sign-in…');
+      const request={prompt:choose?'select_account consent':'consent'};
+      if(!choose) request.login_hint=MUM_EMAIL;
+      tokenClient.requestAccessToken(request);
+    };
+  }
+  init();
+})();
+</script>
+</body>
+</html>

@@ -20,6 +20,11 @@ self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
 
+  if (url.pathname.endsWith('/expense-vault/google-calendar-connect.html')) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+
   if (event.request.mode === 'navigate') {
     event.respondWith((async () => {
       try {

@@ -20,7 +20,7 @@ const S = {
   v: 'home', mo: 0, q: '', range: 'all', from: '', to: '',
   f: { type: '', cat: '', pay: '', min: '', max: '', sort: 'new' },
   rf: { cat: '', from: '', to: '', min: '', max: '' },
-  per: 'month', theme: 'system', rq: ''
+  per: 'month', amo: 0, theme: 'system', rq: ''
 };
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -67,6 +67,26 @@ const monthOffsetForDate = date => {
   const d = D(String(date).slice(0,10)), now = D(TODAY);
   return (d.getFullYear() - now.getFullYear()) * 12 + (d.getMonth() - now.getMonth());
 };
+const monthOffsetForKey = key => monthOffsetForDate(String(key).slice(0,7) + '-01');
+const daysInMonthKey = key => new Date(+key.slice(0,4), +key.slice(5), 0).getDate();
+const shiftMonthKey = (key, delta) => {
+  const d = D(key + '-01'); d.setMonth(d.getMonth() + delta); return ds(d).slice(0,7);
+};
+function analyticsMonthKeys() {
+  const current = TODAY.slice(0,7);
+  const txKeys = TX.map(t => String(t.date || '').slice(0,7)).filter(k => /^\d{4}-\d{2}$/.test(k) && k <= current).sort();
+  const earliest = txKeys[0] || current;
+  const keys = [];
+  let k = earliest, guard = 0;
+  while (k <= current && guard++ < 240) { keys.push(k); k = shiftMonthKey(k, 1); }
+  return keys.length ? keys : [current];
+}
+function setAnalyticsMonthKey(key) {
+  if (!/^\d{4}-\d{2}$/.test(String(key))) return;
+  S.amo = Math.min(0, monthOffsetForKey(key));
+  S.per = 'month';
+  render();
+}
 const inMonth = k => TX.filter(t => t.date.startsWith(k));
 const between = (a, b) => TX.filter(t => t.date >= a && t.date <= b);
 const uid = p => `${p}${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
@@ -1151,24 +1171,116 @@ function gres(q) {
 
 /* ---------- analytics ---------- */
 function analytics() {
-  const days = { day: 1, week: 7, month: 30, year: 365 }[S.per], from = add(TODAY, -(days - 1)), pf = add(from, -days), pt = add(from, -1);
-  const l = between(from, TODAY), p = between(pf, pt), out = expenseSum(l), inc = incomeSum(l), net = inc - out, prev = expenseSum(p), ch = prev ? (out - prev) / prev * 100 : 0, big = expenses(l).slice().sort((a, b) => b.amount - a.amount)[0];
-  let vals, labs, incVals;
-  if (S.per === 'year') { const ks = Array.from({length:12},(_,i)=>monthKey(i-11)); vals = ks.map(k => expenseSum(inMonth(k))); incVals = ks.map(k => incomeSum(inMonth(k))); labs = ks.map(k => monthName(k).slice(0, 3)); }
-  else { const n = S.per === 'day' ? 7 : days, st = add(TODAY, -(n - 1)); vals = Array.from({ length: n }, (_, i) => expenseSum(TX.filter(t => t.date === add(st, i)))); incVals = Array.from({ length: n }, (_, i) => incomeSum(TX.filter(t => t.date === add(st, i)))); labs = vals.map((_, i) => n <= 7 ? D(add(st, i)).toLocaleDateString('en-GB', { weekday: 'short' }) : (i % 5 === 4 ? add(st, i).slice(8) : '')); }
-  const merch = Object.entries(expenses(l).reduce((m, t) => (m[t.merchant] = (m[t.merchant] || 0) + t.amount, m), {})).sort((a, b) => b[1] - a[1]).slice(0, 5);
-  const mk = [-3, -2, -1, 0].map(monthKey);
-  return `<h1>Analytics</h1><div class="chips">${['day', 'week', 'month', 'year'].map(k => `<button class="pill ${S.per === k ? 'on' : ''}" onclick="S.per='${k}';render()">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div>
-  <div class="grid2"><button class="card stat tap-card" onclick="drillPeriod('income','${from}',TODAY,'Income · ${S.per}')"><span class="mut">Income</span><b class="income-amt">${eur(inc)}</b><span class="tap-more">View details ›</span></button><button class="card stat tap-card" onclick="drillPeriod('expense','${from}',TODAY,'Expenses · ${S.per}')"><span class="mut">Expenses</span><b>${eur(out)}</b><span class="tap-more">View details ›</span></button><button class="card stat tap-card" onclick="drillPeriod('all','${from}',TODAY,'Activity · ${S.per}')"><span class="mut">Net balance</span><b class="${net >= 0 ? 'income-amt' : 'up'}">${eur(net)}</b><span class="tap-more">View activity ›</span></button><button class="card stat tap-card" onclick="drillPeriod('all','${from}',TODAY,'Transactions · ${S.per}')"><span class="mut">Transactions</span><b>${l.length}</b><span class="tap-more">View list ›</span></button></div>
-  <div class="card" style="margin-top:14px"><span class="mut">Spending · ${fd(from)} – ${fd(TODAY)}</span><div class="big">${eur(out)}</div><span class="${ch > 0 ? 'up' : 'down'}">${prev ? `${ch > 0 ? '↑' : '↓'} ${Math.abs(ch).toFixed(1)}% vs previous ${S.per}` : 'No previous period comparison yet'}</span></div>
-  <div class="grid2"><div class="card stat"><span class="mut">Avg spent/day</span><b>${eur(out / days)}</b></div><button class="card stat tap-card" ${big ? `onclick="txDetail('${big.id}')"` : 'disabled'}><span class="mut">Largest expense</span><b>${big ? eur(big.amount) : '—'}</b>${big ? '<span class="tap-more">View transaction ›</span>' : ''}</button></div>
-  <div class="card" style="margin-top:14px"><h2>Spending over time</h2>${bars(vals, labs)}</div>
-  <div class="card"><h2>Income over time</h2>${bars(incVals, labs, 'var(--ok)')}</div>
-  <div class="card"><h2>Where does my money go?</h2>${expenses(l).length ? donutCard(expenses(l)) : '<p class="mut">No expense data.</p>'}</div>
-  <div class="card"><h2>Top merchants</h2>${merch.map(([n, v]) => `<button class="merchant-row" onclick="drillMerchant('${jsarg(n)}','${from}',TODAY)"><div class="row sp"><span>${esc(n)}</span><b>${eur(v)}</b></div><div class="bar"><i style="width:${v / merch[0][1] * 100}%;background:var(--acc)"></i></div><span class="tap-more">View purchases ›</span></button>`).join('') || '<p class="mut">No expense data.</p>'}</div>
-  <div class="card"><h2>Recent monthly income</h2>${bars(mk.map(k => incomeSum(inMonth(k))), mk.map(k => monthName(k).slice(0, 3)), 'var(--ok)')}</div>`;
-}
+  const modeChips = `<div class="chips">${['day','week','month','year'].map(k => `<button class="pill ${S.per===k?'on':''}" onclick="S.per='${k}';render()">${k[0].toUpperCase()+k.slice(1)}</button>`).join('')}</div>`;
 
+  if (S.per === 'month') {
+    const keys = analyticsMonthKeys();
+    const currentKey = TODAY.slice(0,7);
+    const key = monthKey(Math.min(0, Number(S.amo || 0)));
+    if (!keys.includes(key) && key < keys[0]) S.amo = monthOffsetForKey(keys[0]);
+    const selectedKey = monthKey(Math.min(0, Number(S.amo || 0)));
+    const selectedIsCurrent = selectedKey === currentKey;
+    const dim = daysInMonthKey(selectedKey);
+    const selectedDays = selectedIsCurrent ? Math.min(+TODAY.slice(8), dim) : dim;
+    const from = selectedKey + '-01';
+    const to = selectedKey + '-' + String(selectedDays).padStart(2,'0');
+    const l = TX.filter(t => t.date >= from && t.date <= to);
+    const out = expenseSum(l), inc = incomeSum(l), net = inc - out, jarChange = savingsBalance(l);
+    const big = expenses(l).slice().sort((a,b)=>b.amount-a.amount)[0];
+
+    const prevKey = shiftMonthKey(selectedKey,-1);
+    const prevDays = Math.min(selectedDays, daysInMonthKey(prevKey));
+    const prevFrom = prevKey + '-01', prevTo = prevKey + '-' + String(prevDays).padStart(2,'0');
+    const p = TX.filter(t => t.date >= prevFrom && t.date <= prevTo);
+    const prevOut = expenseSum(p), prevInc = incomeSum(p), prevNet = prevInc - prevOut;
+    const spendChange = prevOut ? (out-prevOut)/prevOut*100 : null;
+    const incomeChange = prevInc ? (inc-prevInc)/prevInc*100 : null;
+
+    const vals = Array.from({length:selectedDays},(_,i)=>expenseSum(TX.filter(t=>t.date===selectedKey+'-'+String(i+1).padStart(2,'0'))));
+    const incVals = Array.from({length:selectedDays},(_,i)=>incomeSum(TX.filter(t=>t.date===selectedKey+'-'+String(i+1).padStart(2,'0'))));
+    const labs = vals.map((_,i)=>i===0 || (i+1)%5===0 || i===selectedDays-1 ? String(i+1) : '');
+
+    const merch = Object.entries(expenses(l).reduce((m,t)=>(m[t.merchant]=(m[t.merchant]||0)+Number(t.amount||0),m),{})).sort((a,b)=>b[1]-a[1]).slice(0,5);
+    const historyKeys = keys.slice(-12);
+    const historyDesc = keys.slice().reverse();
+    const selectedIndex = keys.indexOf(selectedKey);
+    const canOlder = selectedIndex > 0;
+    const canNewer = selectedIndex >= 0 && selectedIndex < keys.length-1;
+    const periodLabel = selectedIsCurrent ? `${monthName(selectedKey)} · through ${fd(to)}` : monthName(selectedKey);
+    const compareLabel = selectedIsCurrent ? `vs ${monthName(prevKey)} through day ${prevDays}` : `vs ${monthName(prevKey)}`;
+
+    const perfRows = historyDesc.map(k => {
+      const ml=inMonth(k), mi=incomeSum(ml), mo=expenseSum(ml), mn=mi-mo;
+      const label=k===currentKey?'Current · '+monthName(k):monthName(k);
+      return `<button class="analytics-history-row ${k===selectedKey?'on':''}" onclick="setAnalyticsMonthKey('${k}')"><div class="grow"><b>${esc(label)}</b><div class="mut">Income ${eur(mi)} · Spent ${eur(mo)}</div></div><span class="amt ${mn>=0?'income-amt':'up'}">${eur(mn)}</span></button>`;
+    }).join('');
+
+    return `<h1>Analytics</h1>${modeChips}
+      <div class="analytics-month-nav">
+        <button class="icon-btn" aria-label="Previous month" ${canOlder?'':'disabled'} onclick="if(${canOlder}){S.amo--;render()}">‹</button>
+        <select aria-label="Analysis month" onchange="setAnalyticsMonthKey(this.value)">${keys.slice().reverse().map(k=>`<option value="${k}" ${k===selectedKey?'selected':''}>${monthName(k)}${k===currentKey?' · Current':''}</option>`).join('')}</select>
+        <button class="icon-btn" aria-label="Next month" ${canNewer?'':'disabled'} onclick="if(${canNewer}){S.amo++;render()}">›</button>
+      </div>
+      <div class="mut analytics-period-label">${esc(periodLabel)}</div>
+
+      <div class="grid2 analytics-kpis">
+        <button class="card stat tap-card" onclick="drillPeriod('income','${from}','${to}','Income · ${monthName(selectedKey)}')"><span class="mut">Income</span><b class="income-amt">${eur(inc)}</b><span class="tap-more">View details ›</span></button>
+        <button class="card stat tap-card" onclick="drillPeriod('expense','${from}','${to}','Expenses · ${monthName(selectedKey)}')"><span class="mut">Expenses</span><b>${eur(out)}</b><span class="tap-more">View details ›</span></button>
+        <button class="card stat tap-card" onclick="drillPeriod('all','${from}','${to}','Activity · ${monthName(selectedKey)}')"><span class="mut">Net result</span><b class="${net>=0?'income-amt':'up'}">${eur(net)}</b><span class="tap-more">View activity ›</span></button>
+        <button class="card stat tap-card" onclick="drillPeriod('all','${from}','${to}','Transactions · ${monthName(selectedKey)}')"><span class="mut">Transactions</span><b>${l.length}</b><span class="tap-more">View list ›</span></button>
+      </div>
+
+      <div class="card analytics-comparison">
+        <div class="row sp"><div><span class="mut">Performance comparison</span><h2 style="margin:2px 0 0">${esc(compareLabel)}</h2></div><button class="detail-link" onclick="monthOverview('${selectedKey}')">Full breakdown ›</button></div>
+        <div class="analytics-compare-grid">
+          <div><span class="mut">Spending</span><b class="${spendChange!==null && spendChange>0?'up':'down'}">${spendChange===null?'No prior data':(spendChange>0?'↑ ':'↓ ')+Math.abs(spendChange).toFixed(1)+'%'}</b><small>${eur(out)} vs ${eur(prevOut)}</small></div>
+          <div><span class="mut">Income</span><b class="${incomeChange!==null && incomeChange>=0?'income-amt':'up'}">${incomeChange===null?'No prior data':(incomeChange>=0?'↑ ':'↓ ')+Math.abs(incomeChange).toFixed(1)+'%'}</b><small>${eur(inc)} vs ${eur(prevInc)}</small></div>
+          <div><span class="mut">Net result</span><b class="${net>=0?'income-amt':'up'}">${eur(net)}</b><small>Previous ${eur(prevNet)}</small></div>
+          <div><span class="mut">Savings Jar change</span><b>${jarChange>=0?'+':''}${eur(jarChange)}</b><small>Transfers only</small></div>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div class="card stat"><span class="mut">Avg spent/day</span><b>${eur(out/Math.max(1,selectedDays))}</b></div>
+        <button class="card stat tap-card" ${big?`onclick="txDetail('${big.id}')"`:'disabled'}><span class="mut">Largest expense</span><b>${big?eur(big.amount):'—'}</b>${big?'<span class="tap-more">View transaction ›</span>':''}</button>
+      </div>
+
+      <div class="card" style="margin-top:14px"><h2>Daily spending · ${monthName(selectedKey)}</h2>${bars(vals,labs)}</div>
+      <div class="card"><h2>Daily income · ${monthName(selectedKey)}</h2>${bars(incVals,labs,'var(--ok)')}</div>
+      <div class="card"><div class="row sp"><h2>Cost breakdown</h2><button class="detail-link" onclick="categoryBreakdown('${selectedKey}')">View categories ›</button></div>${expenses(l).length?donutCard(expenses(l)):'<p class="mut">No expense data for this month.</p>'}</div>
+      <div class="card"><h2>Top merchants</h2>${merch.map(([n,v])=>`<button class="merchant-row" onclick="drillMerchant('${jsarg(n)}','${from}','${to}')"><div class="row sp"><span>${esc(n)}</span><b>${eur(v)}</b></div><div class="bar"><i style="width:${v/merch[0][1]*100}%;background:var(--acc)"></i></div><span class="tap-more">View purchases ›</span></button>`).join('')||'<p class="mut">No expense data.</p>'}</div>
+
+      <div class="card"><h2>Monthly spending trend</h2><p class="mut">Up to the last 12 recorded/current months.</p>${bars(historyKeys.map(k=>expenseSum(inMonth(k))),historyKeys.map(k=>monthName(k).slice(0,3)))}</div>
+      <div class="card"><h2>Monthly income trend</h2>${bars(historyKeys.map(k=>incomeSum(inMonth(k))),historyKeys.map(k=>monthName(k).slice(0,3)),'var(--ok)')}</div>
+
+      <div class="card"><div class="row sp"><h2>Month-by-month performance</h2><span class="mut">${keys.length} month${keys.length===1?'':'s'}</span></div>${perfRows}</div>`;
+  }
+
+  const days = { day:1, week:7, year:365 }[S.per] || 7;
+  const from = add(TODAY,-(days-1)), pf=add(from,-days), pt=add(from,-1);
+  const l=between(from,TODAY), p=between(pf,pt), out=expenseSum(l), inc=incomeSum(l), net=inc-out, prev=expenseSum(p), ch=prev?(out-prev)/prev*100:0, big=expenses(l).slice().sort((a,b)=>b.amount-a.amount)[0];
+  let vals,labs,incVals;
+  if(S.per==='year'){
+    const ks=Array.from({length:12},(_,i)=>monthKey(i-11));
+    vals=ks.map(k=>expenseSum(inMonth(k))); incVals=ks.map(k=>incomeSum(inMonth(k))); labs=ks.map(k=>monthName(k).slice(0,3));
+  } else {
+    const n=S.per==='day'?7:days, st=add(TODAY,-(n-1));
+    vals=Array.from({length:n},(_,i)=>expenseSum(TX.filter(t=>t.date===add(st,i))));
+    incVals=Array.from({length:n},(_,i)=>incomeSum(TX.filter(t=>t.date===add(st,i))));
+    labs=vals.map((_,i)=>n<=7?D(add(st,i)).toLocaleDateString('en-GB',{weekday:'short'}):(i%5===4?add(st,i).slice(8):''));
+  }
+  const merch=Object.entries(expenses(l).reduce((m,t)=>(m[t.merchant]=(m[t.merchant]||0)+t.amount,m),{})).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const mk=[-3,-2,-1,0].map(monthKey);
+  return `<h1>Analytics</h1>${modeChips}
+    <div class="grid2"><button class="card stat tap-card" onclick="drillPeriod('income','${from}',TODAY,'Income · ${S.per}')"><span class="mut">Income</span><b class="income-amt">${eur(inc)}</b><span class="tap-more">View details ›</span></button><button class="card stat tap-card" onclick="drillPeriod('expense','${from}',TODAY,'Expenses · ${S.per}')"><span class="mut">Expenses</span><b>${eur(out)}</b><span class="tap-more">View details ›</span></button><button class="card stat tap-card" onclick="drillPeriod('all','${from}',TODAY,'Activity · ${S.per}')"><span class="mut">Net balance</span><b class="${net>=0?'income-amt':'up'}">${eur(net)}</b><span class="tap-more">View activity ›</span></button><button class="card stat tap-card" onclick="drillPeriod('all','${from}',TODAY,'Transactions · ${S.per}')"><span class="mut">Transactions</span><b>${l.length}</b><span class="tap-more">View list ›</span></button></div>
+    <div class="card" style="margin-top:14px"><span class="mut">Spending · ${fd(from)} – ${fd(TODAY)}</span><div class="big">${eur(out)}</div><span class="${ch>0?'up':'down'}">${prev?`${ch>0?'↑':'↓'} ${Math.abs(ch).toFixed(1)}% vs previous ${S.per}`:'No previous period comparison yet'}</span></div>
+    <div class="grid2"><div class="card stat"><span class="mut">Avg spent/day</span><b>${eur(out/days)}</b></div><button class="card stat tap-card" ${big?`onclick="txDetail('${big.id}')"`:'disabled'}><span class="mut">Largest expense</span><b>${big?eur(big.amount):'—'}</b>${big?'<span class="tap-more">View transaction ›</span>':''}</button></div>
+    <div class="card" style="margin-top:14px"><h2>Spending over time</h2>${bars(vals,labs)}</div>
+    <div class="card"><h2>Income over time</h2>${bars(incVals,labs,'var(--ok)')}</div>
+    <div class="card"><h2>Where does my money go?</h2>${expenses(l).length?donutCard(expenses(l)):'<p class="mut">No expense data.</p>'}</div>
+    <div class="card"><h2>Top merchants</h2>${merch.map(([n,v])=>`<button class="merchant-row" onclick="drillMerchant('${jsarg(n)}','${from}',TODAY)"><div class="row sp"><span>${esc(n)}</span><b>${eur(v)}</b></div><div class="bar"><i style="width:${v/merch[0][1]*100}%;background:var(--acc)"></i></div><span class="tap-more">View purchases ›</span></button>`).join('')||'<p class="mut">No expense data.</p>'}</div>
+    <div class="card"><h2>Recent monthly income</h2>${bars(mk.map(k=>incomeSum(inMonth(k))),mk.map(k=>monthName(k).slice(0,3)),'var(--ok)')}</div>`;
+}
 /* ---------- more / budgets / categories ---------- */
 function more() {
   const it = [['budgets', '🎯', 'Budgets'], ['receipts', '🧾', 'Receipts'], ['cats', '🏷️', 'Categories'], ['backup', '💾', 'Export & Backup'], ['settings', '⚙️', 'Settings'], ['profile', '👤', 'Profile']];

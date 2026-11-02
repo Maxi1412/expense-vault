@@ -149,3 +149,21 @@ input[type=color]{padding:5px;height:50px}.rgrid button{min-width:0;overflow:hid
 .jar-context .row{min-height:28px}
 .money-location-grid .savings-loc{background:var(--card)}
 @media(max-width:360px){.savings-loc{grid-column:auto}}
+
+/* Historical analytics */
+.analytics-month-nav{display:grid;grid-template-columns:44px 1fr 44px;gap:10px;align-items:center;margin:2px 0 6px}
+.analytics-month-nav select{min-width:0;font-weight:700;text-align:center}
+.analytics-month-nav .icon-btn:disabled{opacity:.3;cursor:default}
+.analytics-period-label{text-align:center;margin-bottom:14px}
+.analytics-kpis{margin-bottom:14px}
+.analytics-comparison h2{font-size:16px}
+.analytics-compare-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.analytics-compare-grid>div{background:var(--bg);border:1px solid var(--line);border-radius:14px;padding:12px;min-width:0}
+.analytics-compare-grid b,.analytics-compare-grid small{display:block}
+.analytics-compare-grid b{font-size:18px;margin:3px 0}
+.analytics-compare-grid small{color:var(--mut);font-size:12px;overflow-wrap:anywhere}
+.analytics-history-row{display:flex;align-items:center;gap:12px;width:100%;padding:12px 8px;border-bottom:1px solid var(--line);text-align:left;color:inherit;border-radius:10px}
+.analytics-history-row:last-child{border-bottom:0}
+.analytics-history-row.on{background:var(--acc2)}
+.analytics-history-row .amt{font-size:15px}
+@media(max-width:380px){.analytics-compare-grid{grid-template-columns:1fr}.analytics-month-nav{grid-template-columns:40px 1fr 40px}}

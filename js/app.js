@@ -1582,6 +1582,8 @@ async function exportAnalysisExcel() {
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.incomeCategories.map(x=>({Category:x.category,Amount:x.amount}))),'Income Categories');
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.merchants.map(x=>({Merchant:x.merchant,Amount:x.amount}))),'Merchants');
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.paymentMethods.map(x=>({Payment:x.payment,Amount:x.amount}))),'Payments');
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.moneyLocations.map(x=>({'Money Location':x.location,Income:x.income,Expenses:x.expenses,Net:x.income-x.expenses}))),'Money Locations');
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.transactions.filter(t=>t.type==='savings').map(t=>({Date:t.date,Time:t.time,Direction:t.direction,Amount:t.amount,Notes:t.notes}))),'Savings Jar');
     XLSX.writeFile(wb,analysisExportFilename('xlsx'));
     toast('Excel analysis downloaded.');
   } catch(e) {

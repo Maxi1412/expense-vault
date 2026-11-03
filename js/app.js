@@ -1340,7 +1340,7 @@ function analytics() {
       return `<button class="analytics-history-row ${k===selectedKey?'on':''}" onclick="setAnalyticsMonthKey('${k}')"><div class="grow"><b>${esc(label)}</b><div class="mut">Income ${eur(mi)} · Spent ${eur(mo)}</div></div><span class="amt ${mn>=0?'income-amt':'up'}">${eur(mn)}</span></button>`;
     }).join('');
 
-    return `<h1>Analytics</h1>${modeChips}
+    return `<div class="analytics-title-row"><h1>Analytics</h1><button class="analytics-export-btn" onclick="analysisExportMenu()" aria-label="Export analysis data">⇩ Export</button></div>${modeChips}
       <div class="analytics-month-nav">
         <button class="icon-btn" aria-label="Previous month" ${canOlder?'':'disabled'} onclick="if(${canOlder}){S.amo--;render()}">‹</button>
         <select aria-label="Analysis month" onchange="setAnalyticsMonthKey(this.value)">${keys.slice().reverse().map(k=>`<option value="${k}" ${k===selectedKey?'selected':''}>${monthName(k)}${k===currentKey?' · Current':''}</option>`).join('')}</select>
@@ -1396,7 +1396,7 @@ function analytics() {
   }
   const merch=Object.entries(expenses(l).reduce((m,t)=>(m[t.merchant]=(m[t.merchant]||0)+t.amount,m),{})).sort((a,b)=>b[1]-a[1]).slice(0,5);
   const mk=[-3,-2,-1,0].map(monthKey);
-  return `<h1>Analytics</h1>${modeChips}
+  return `<div class="analytics-title-row"><h1>Analytics</h1><button class="analytics-export-btn" onclick="analysisExportMenu()" aria-label="Export analysis data">⇩ Export</button></div>${modeChips}
     <div class="grid2"><button class="card stat tap-card" onclick="drillPeriod('income','${from}',TODAY,'Income · ${S.per}')"><span class="mut">Income</span><b class="income-amt">${eur(inc)}</b><span class="tap-more">View details ›</span></button><button class="card stat tap-card" onclick="drillPeriod('expense','${from}',TODAY,'Expenses · ${S.per}')"><span class="mut">Expenses</span><b>${eur(out)}</b><span class="tap-more">View details ›</span></button><button class="card stat tap-card" onclick="drillPeriod('all','${from}',TODAY,'Activity · ${S.per}')"><span class="mut">Net balance</span><b class="${net>=0?'income-amt':'up'}">${eur(net)}</b><span class="tap-more">View activity ›</span></button><button class="card stat tap-card" onclick="drillPeriod('all','${from}',TODAY,'Transactions · ${S.per}')"><span class="mut">Transactions</span><b>${l.length}</b><span class="tap-more">View list ›</span></button></div>
     <div class="card" style="margin-top:14px"><span class="mut">Spending · ${fd(from)} – ${fd(TODAY)}</span><div class="big">${eur(out)}</div><span class="${ch>0?'up':'down'}">${prev?`${ch>0?'↑':'↓'} ${Math.abs(ch).toFixed(1)}% vs previous ${S.per}`:'No previous period comparison yet'}</span></div>
     <div class="grid2"><div class="card stat"><span class="mut">Avg spent/day</span><b>${eur(out/days)}</b></div><button class="card stat tap-card" ${big?`onclick="txDetail('${big.id}')"`:'disabled'}><span class="mut">Largest expense</span><b>${big?eur(big.amount):'—'}</b>${big?'<span class="tap-more">View transaction ›</span>':''}</button></div>
@@ -1406,6 +1406,189 @@ function analytics() {
     <div class="card"><h2>Top merchants</h2>${merch.map(([n,v])=>`<button class="merchant-row" onclick="drillMerchant('${jsarg(n)}','${from}',TODAY)"><div class="row sp"><span>${esc(n)}</span><b>${eur(v)}</b></div><div class="bar"><i style="width:${v/merch[0][1]*100}%;background:var(--acc)"></i></div><span class="tap-more">View purchases ›</span></button>`).join('')||'<p class="mut">No expense data.</p>'}</div>
     <div class="card"><h2>Recent monthly income</h2>${bars(mk.map(k=>incomeSum(inMonth(k))),mk.map(k=>monthName(k).slice(0,3)),'var(--ok)')}</div>`;
 }
+/* ---------- analytics exports ---------- */
+function analysisExportPeriod() {
+  if (S.per === 'month') {
+    const key = monthKey(Math.min(0, Number(S.amo || 0)));
+    const current = TODAY.slice(0,7);
+    const days = key === current ? Math.min(Number(TODAY.slice(8)), daysInMonthKey(key)) : daysInMonthKey(key);
+    return { mode:'month', key, from:key+'-01', to:key+'-'+String(days).padStart(2,'0'), label:monthName(key) };
+  }
+  if (S.per === 'day') return { mode:'day', key:TODAY, from:TODAY, to:TODAY, label:fdl(TODAY) };
+  if (S.per === 'week') {
+    const from = add(TODAY,-6);
+    return { mode:'week', key:TODAY, from, to:TODAY, label:fd(from)+' – '+fd(TODAY) };
+  }
+  const from = add(TODAY,-364);
+  return { mode:'year', key:TODAY.slice(0,4), from, to:TODAY, label:fd(from)+' – '+fd(TODAY) };
+}
+function analysisExportData() {
+  const period = analysisExportPeriod();
+  const list = TX.filter(t => t.date >= period.from && t.date <= period.to).slice().sort((a,b)=>a.date.localeCompare(b.date)||String(a.time||'').localeCompare(String(b.time||'')));
+  const ex = expenses(list), incs = incomes(list), jar = savingsTransfers(list);
+  const categories = Object.entries(ex.reduce((m,t)=>(m[t.category]=(m[t.category]||0)+Number(t.amount||0),m),{})).sort((a,b)=>b[1]-a[1]).map(([category,amount])=>({category,amount}));
+  const incomeCategories = Object.entries(incs.reduce((m,t)=>(m[t.category]=(m[t.category]||0)+Number(t.amount||0),m),{})).sort((a,b)=>b[1]-a[1]).map(([category,amount])=>({category,amount}));
+  const merchants = Object.entries(ex.reduce((m,t)=>(m[t.merchant]=(m[t.merchant]||0)+Number(t.amount||0),m),{})).sort((a,b)=>b[1]-a[1]).map(([merchant,amount])=>({merchant,amount}));
+  const paymentMethods = Object.entries(ex.reduce((m,t)=>(m[t.payment||'Other']=(m[t.payment||'Other']||0)+Number(t.amount||0),m),{})).sort((a,b)=>b[1]-a[1]).map(([payment,amount])=>({payment,amount}));
+  const locations = [
+    { location:'Bank / Card', income:incomeSum(list.filter(t=>fundOf(t)==='card')), expenses:expenseSum(list.filter(t=>fundOf(t)==='card')) },
+    { location:'Cash', income:incomeSum(list.filter(t=>fundOf(t)==='cash')), expenses:expenseSum(list.filter(t=>fundOf(t)==='cash')) }
+  ];
+  const totalTax = ex.reduce((n,t)=>n+Number(t.personalTax ?? t.taxTotal ?? 0),0);
+  const attachmentCount = list.filter(t=>t.receiptId).length;
+  const savingsAdded = sum(jar.filter(t=>t.direction!=='withdrawal'));
+  const savingsTaken = sum(jar.filter(t=>t.direction==='withdrawal'));
+
+  return {
+    app:'Expense Vault',
+    exportType:'analysis',
+    generatedAt:new Date().toISOString(),
+    currency:PROFILE.currency || 'EUR',
+    period,
+    summary:{
+      income:incomeSum(list),
+      expenses:expenseSum(list),
+      net:incomeSum(list)-expenseSum(list),
+      transactionCount:list.length,
+      expenseCount:ex.length,
+      incomeCount:incs.length,
+      savingsTransferCount:jar.length,
+      savingsAdded,
+      savingsTaken,
+      savingsNet:savingsAdded-savingsTaken,
+      taxRecorded:totalTax,
+      attachments:attachmentCount
+    },
+    expenseCategories:categories,
+    incomeCategories,
+    merchants,
+    paymentMethods,
+    moneyLocations:locations,
+    transactions:list.map(t=>({
+      id:t.id,
+      type:t.type || 'expense',
+      direction:t.type==='savings' ? (t.direction || 'deposit') : '',
+      date:t.date,
+      time:t.time || '',
+      merchantOrSource:t.merchant || '',
+      amount:Number(t.amount||0),
+      receiptTotal:t.type==='expense' ? Number(t.receiptTotal ?? t.amount ?? 0) : null,
+      subtotal:t.type==='expense' ? Number(t.subtotal ?? 0) : null,
+      tax:t.type==='expense' ? Number(t.personalTax ?? t.taxTotal ?? 0) : null,
+      taxRates:t.type==='expense' ? (t.taxRates || []) : [],
+      category:t.category || '',
+      subcategory:t.subcategory || '',
+      payment:t.payment || '',
+      moneyLocation:t.type==='savings' ? 'Cash ↔ Savings Jar' : fundLabel(fundOf(t)),
+      notes:t.notes || '',
+      hasAttachment:Boolean(t.receiptId),
+      receiptId:t.receiptId || null,
+      ocrText:t.ocrText || '',
+      created:t.created || '',
+      modified:t.modified || ''
+    }))
+  };
+}
+function analysisExportFilename(ext) {
+  const p = analysisExportPeriod();
+  const slug = p.mode === 'month' ? p.key : (p.mode + '-' + p.from + '-to-' + p.to);
+  return 'expense-vault-analysis-' + slug + '.' + ext;
+}
+function analysisExportMenu() {
+  const d = analysisExportData();
+  sheet(`<h2>Export analysis</h2>
+    <div class="card export-period-card"><span class="mut">Period</span><b>${esc(d.period.label)}</b><div class="mut">${d.summary.transactionCount} transactions · Income ${eur(d.summary.income)} · Expenses ${eur(d.summary.expenses)}</div></div>
+    <button class="choice" onclick="exportAnalysisText()"><span class="ico">📄</span><span><b>Text file (.txt)</b><br><span class="mut">Easy to read on any device</span></span></button>
+    <button class="choice" onclick="exportAnalysisExcel()"><span class="ico">📊</span><span><b>Excel file (.xlsx)</b><br><span class="mut">Summary, transactions and breakdown sheets</span></span></button>
+    <button class="choice" onclick="exportAnalysisJson()"><span class="ico">🧠</span><span><b>JSON file (.json)</b><br><span class="mut">Best format to upload back to ChatGPT for detailed analysis</span></span></button>
+    <p class="mut export-note">These exports contain the selected analysis period only. Receipt images are not embedded; attachment references and OCR text are included where available.</p>`);
+}
+function exportAnalysisJson() {
+  const d = analysisExportData();
+  downloadBlob(new Blob([JSON.stringify(d,null,2)],{type:'application/json;charset=utf-8'}),analysisExportFilename('json'));
+  toast('JSON analysis downloaded.');
+}
+function exportAnalysisText() {
+  const d = analysisExportData(), s=d.summary;
+  const lines=[
+    'EXPENSE VAULT ANALYSIS',
+    'Period: '+d.period.label,
+    'Generated: '+new Date(d.generatedAt).toLocaleString(),
+    '',
+    'SUMMARY',
+    'Income: '+eur(s.income),
+    'Expenses: '+eur(s.expenses),
+    'Net result: '+eur(s.net),
+    'Transactions: '+s.transactionCount,
+    'Savings Jar added: '+eur(s.savingsAdded),
+    'Savings Jar taken out: '+eur(s.savingsTaken),
+    'Savings Jar net change: '+eur(s.savingsNet),
+    'Recorded tax / VAT: '+eur(s.taxRecorded),
+    'Attachments: '+s.attachments,
+    '',
+    'EXPENSE CATEGORY BREAKDOWN',
+    ...(d.expenseCategories.length?d.expenseCategories.map(x=>x.category+': '+eur(x.amount)):['No expense data']),
+    '',
+    'INCOME CATEGORY BREAKDOWN',
+    ...(d.incomeCategories.length?d.incomeCategories.map(x=>x.category+': '+eur(x.amount)):['No income data']),
+    '',
+    'TOP MERCHANTS',
+    ...(d.merchants.length?d.merchants.map(x=>x.merchant+': '+eur(x.amount)):['No merchant data']),
+    '',
+    'TRANSACTIONS',
+    ...d.transactions.map(t=>[
+      t.date+(t.time?' '+t.time:''),
+      String(t.type).toUpperCase(),
+      t.merchantOrSource,
+      eur(t.amount),
+      t.category+(t.subcategory?' / '+t.subcategory:''),
+      t.moneyLocation,
+      t.payment,
+      t.notes?'Notes: '+t.notes:'',
+      t.tax!==null&&t.tax>0?'Tax/VAT: '+eur(t.tax):'',
+      t.hasAttachment?'Attachment: yes':''
+    ].filter(Boolean).join(' | '))
+  ];
+  downloadBlob(new Blob([lines.join('\r\n')],{type:'text/plain;charset=utf-8'}),analysisExportFilename('txt'));
+  toast('Text analysis downloaded.');
+}
+async function exportAnalysisExcel() {
+  try {
+    const d=analysisExportData(), s=d.summary;
+    await loadScript('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js','XLSX');
+    const wb=XLSX.utils.book_new();
+    const summaryRows=[
+      {Metric:'Period',Value:d.period.label},
+      {Metric:'Income',Value:s.income},
+      {Metric:'Expenses',Value:s.expenses},
+      {Metric:'Net result',Value:s.net},
+      {Metric:'Transactions',Value:s.transactionCount},
+      {Metric:'Savings Jar added',Value:s.savingsAdded},
+      {Metric:'Savings Jar taken out',Value:s.savingsTaken},
+      {Metric:'Savings Jar net change',Value:s.savingsNet},
+      {Metric:'Recorded tax / VAT',Value:s.taxRecorded},
+      {Metric:'Attachments',Value:s.attachments}
+    ];
+    const txRows=d.transactions.map(t=>({
+      Type:t.type,Direction:t.direction,Date:t.date,Time:t.time,
+      'Merchant / Source':t.merchantOrSource,Amount:t.amount,'Receipt Total':t.receiptTotal ?? '',
+      Subtotal:t.subtotal ?? '',Tax:t.tax ?? '','Tax Rate(s)':Array.isArray(t.taxRates)?t.taxRates.join(', '):'',
+      Category:t.category,Subcategory:t.subcategory,Payment:t.payment,'Money Location':t.moneyLocation,
+      Notes:t.notes,Attachment:t.hasAttachment?'Yes':'No','OCR Text':t.ocrText
+    }));
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(summaryRows),'Summary');
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(txRows),'Transactions');
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.expenseCategories.map(x=>({Category:x.category,Amount:x.amount}))),'Expense Categories');
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.incomeCategories.map(x=>({Category:x.category,Amount:x.amount}))),'Income Categories');
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.merchants.map(x=>({Merchant:x.merchant,Amount:x.amount}))),'Merchants');
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.paymentMethods.map(x=>({Payment:x.payment,Amount:x.amount}))),'Payments');
+    XLSX.writeFile(wb,analysisExportFilename('xlsx'));
+    toast('Excel analysis downloaded.');
+  } catch(e) {
+    toast('Excel export could not load. TXT and JSON exports remain available.');
+  }
+}
+
 /* ---------- more / budgets / categories ---------- */
 function more() {
   const it = [['budgets', '🎯', 'Budgets'], ['receipts', '🧾', 'Receipts'], ['cats', '🏷️', 'Categories'], ['backup', '💾', 'Export & Backup'], ['settings', '⚙️', 'Settings'], ['profile', '👤', 'Profile']];

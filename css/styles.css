@@ -184,3 +184,12 @@ input[type=color]{padding:5px;height:50px}.rgrid button{min-width:0;overflow:hid
 .jar-history-summary .row{min-height:32px}
 .jar-history-summary .row+.row{border-top:1px solid var(--line)}
 @media(max-width:390px){.jar-hero{align-items:flex-start;flex-direction:column}.jar-hero-side{text-align:left}.jar-tabs button{font-size:13px;padding:8px 5px}}
+
+/* Analytics export */
+.analytics-title-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px}
+.analytics-title-row h1{margin:0}
+.analytics-export-btn{min-height:44px;padding:9px 15px;border-radius:14px;background:var(--card);border:2px solid var(--ok);color:var(--tx);font-weight:750;box-shadow:var(--sh);white-space:nowrap}
+.analytics-export-btn:active{transform:scale(.98)}
+.export-period-card b{display:block;font-size:18px;margin:3px 0}
+.export-note{margin:12px 2px 0}
+@media(max-width:360px){.analytics-export-btn{padding:8px 11px;font-size:13px}}

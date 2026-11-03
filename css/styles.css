@@ -167,3 +167,20 @@ input[type=color]{padding:5px;height:50px}.rgrid button{min-width:0;overflow:hid
 .analytics-history-row.on{background:var(--acc2)}
 .analytics-history-row .amt{font-size:15px}
 @media(max-width:380px){.analytics-compare-grid{grid-template-columns:1fr}.analytics-month-nav{grid-template-columns:40px 1fr 40px}}
+
+/* Savings Jar analytics */
+.jar-title{margin-bottom:10px}
+.jar-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:14px 0}
+.jar-tabs button{min-height:42px;border:1px solid var(--line);border-radius:12px;background:var(--bg);font-weight:700;color:var(--mut)}
+.jar-tabs button.on{background:var(--acc2);color:var(--acc);border-color:transparent}
+.jar-tab-body{padding-bottom:4px}
+.jar-hero{display:flex;align-items:flex-end;justify-content:space-between;gap:14px}
+.jar-hero-side{text-align:right;display:flex;flex-direction:column;gap:3px}
+.jar-hero-side b{font-size:20px}
+.jar-kpis{margin:12px 0}
+.jar-highlight{font-size:22px;color:var(--ok)}
+.jar-month-nav{margin:2px 0 14px}
+.jar-history-filter{margin:8px 0 12px}
+.jar-history-summary .row{min-height:32px}
+.jar-history-summary .row+.row{border-top:1px solid var(--line)}
+@media(max-width:390px){.jar-hero{align-items:flex-start;flex-direction:column}.jar-hero-side{text-align:left}.jar-tabs button{font-size:13px;padding:8px 5px}}

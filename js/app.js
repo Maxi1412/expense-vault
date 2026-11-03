@@ -254,14 +254,14 @@ async function reloadData() {
   TX = await DB.all('transactions');
   CATS = await DB.getMeta('categories', structuredClone(CATS_DEFAULT));
   const catDefaultsVersion = Number(await DB.getMeta('expenseCategoriesVersion', 0) || 0);
-  if (catDefaultsVersion < 2) {
+  if (catDefaultsVersion < 3) {
     const existingNames = new Set(CATS.map(x => x.name));
     const missingDefaults = CATS_DEFAULT.filter(x => !existingNames.has(x.name)).map(x => structuredClone(x));
     if (missingDefaults.length) {
       CATS = [...CATS, ...missingDefaults];
       await DB.setMeta('categories', CATS);
     }
-    await DB.setMeta('expenseCategoriesVersion', 2);
+    await DB.setMeta('expenseCategoriesVersion', 3);
   }
   INCOME_CATS = await DB.getMeta('incomeCategories', structuredClone(INCOME_CATS_DEFAULT));
   const legacy = TX.filter(t => !t.type);
@@ -935,6 +935,11 @@ function categorizeReceipt(merchant, text) {
     ['Transport', /renfe|metro|bus|taxi|uber|cabify|train|tranv[ií]a/],
     ['Clothing', /zara|primark|h\s*&\s*m|mango|clothing|fashion|ropa|camiseta|pantal[oó]n|vestido|zapato|zapatilla|shoe|sneaker|calzado/],
     ['Tobacco', /tabaco|tobacco|cigarr|cigarette|cigarro|cigar\b|estanco|iqos|heets|terea|camel\b|marlboro|chesterfield|winston\b|lucky strike/],
+    ['Vehicle Finance', /vehicle\s+finance|auto\s+finance|car\s+finance|motorbike\s+finance|motorcycle\s+finance|financiaci[oó]n\s+(?:veh[ií]culo|coche|moto)|cuota\s+(?:coche|moto|veh[ií]culo)|pr[eé]stamo\s+(?:coche|moto|veh[ií]culo)|car\s+loan|bike\s+loan|motorcycle\s+loan|vehicle\s+loan|leasing\s+(?:coche|moto|veh[ií]culo|car|bike)/],
+    ['Loans & Debt', /loan\s+(?:repayment|payment)|debt\s+(?:repayment|payment)|cuota\s+pr[eé]stamo|pago\s+pr[eé]stamo|amortizaci[oó]n\s+pr[eé]stamo|pr[eé]stamo\s+personal|personal\s+loan|pago\s+deuda|debt\b|deuda\b/],
+    ['Interest & Finance Charges', /interest\b|inter[eé]s(?:es)?\b|finance\s+charge|financial\s+charge|cargo\s+financiero|recargo\s+financiero|late\s+fee|mora\b|intereses\s+de\s+mora/],
+    ['Taxes & Government Fees', /impuesto|\btax\b|\btaxes\b|tasa\s+(?:municipal|administrativa|veh[ií]culo)|agencia\s+tributaria|hacienda|dgt\b|suma\b|ayuntamiento|government\s+fee|municipal\s+fee|road\s+tax|vehicle\s+tax/],
+    ['Legal & Administration', /notar[ií]a|notary|abogad[oa]|lawyer|legal\s+fee|gestor[ií]a|gestor\b|administrative\s+fee|gastos\s+administrativos|registro\s+de\s+la\s+propiedad|registro\s+mercantil/],
     ['Banking & Fees', /comisi[oó]n\s+(?:bancaria|cuenta|tarjeta)|bank\s+fee|banking\s+fee|atm\s+fee|maintenance\s+fee|monthly\s+fee|cuota\s+tarjeta|gastos\s+bancarios/],
     ['Fitness & Sports', /gimnasio|gym\b|fitness|sport\b|deporte|decathlon|sports?\s+club|membership\s+gym|cuota\s+gimnasio/],
     ['Home & Garden', /garden\s+centre|garden\s+center|jardiner[ií]a|vivero|plantas?\b|maceta|fertilizante|abono\s+plantas|césped|cesped/],
@@ -969,6 +974,15 @@ function inferReceiptSubcategory(category, merchant, text, time) {
   if (category === 'Groceries') return 'Supermarket';
   if (category === 'Clothing' && /(zapato|zapatilla|shoe|sneaker|calzado|footwear)/.test(s)) return 'Shoes';
   if (category === 'Internet & Phone' && /(recarga|top.?up|recharge|saldo)/.test(s)) return 'Top-up';
+  if (category === 'Vehicle Finance') {
+    if (/(moto|motorbike|motorcycle|bike)/.test(s)) return 'Motorbike installment';
+    if (/(coche|car\b|auto\b)/.test(s)) return 'Car installment';
+    return 'Vehicle installment';
+  }
+  if (category === 'Loans & Debt') return 'Debt repayment';
+  if (category === 'Interest & Finance Charges') return 'Interest / finance charge';
+  if (category === 'Taxes & Government Fees') return /(vehicle|veh[ií]culo|road\s+tax|dgt)/.test(s) ? 'Vehicle tax / fee' : 'Tax / government fee';
+  if (category === 'Legal & Administration') return /(notar|abogad|lawyer|legal)/.test(s) ? 'Legal / notary' : 'Administration';
   return '';
 }
 

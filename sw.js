@@ -1,4 +1,4 @@
-const CACHE = 'expense-vault-v26';
+const CACHE = 'expense-vault-v27';
 const APP_SHELL = [
   './', './index.html', './css/styles.css', './js/data.js', './js/db.js', './js/app.js',
   './manifest.webmanifest', './icons/icon.svg'

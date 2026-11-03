@@ -20,7 +20,7 @@ const S = {
   v: 'home', mo: 0, q: '', range: 'all', from: '', to: '',
   f: { type: '', cat: '', pay: '', min: '', max: '', sort: 'new' },
   rf: { cat: '', from: '', to: '', min: '', max: '' },
-  per: 'month', amo: 0, theme: 'system', rq: ''
+  per: 'month', amo: 0, jarTab: 'overview', jmo: 0, jf: 'all', theme: 'system', rq: ''
 };
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
@@ -1099,13 +1099,124 @@ async function saveIncome(id) {
 }
 
 /* ---------- savings jar ---------- */
-function savingsJarView() {
-  const l = savingsTransfers(TX).slice().sort((a,b) => b.date.localeCompare(a.date) || String(b.time || '').localeCompare(String(a.time || '')));
+function jarMonthKeys() {
+  const current = TODAY.slice(0,7);
+  const txKeys = savingsTransfers(TX).map(t => String(t.date || '').slice(0,7)).filter(k => /^\d{4}-\d{2}$/.test(k) && k <= current).sort();
+  const earliest = txKeys[0] || current;
+  const keys = [];
+  let k = earliest, guard = 0;
+  while (k <= current && guard++ < 240) { keys.push(k); k = shiftMonthKey(k, 1); }
+  return keys.length ? keys : [current];
+}
+function jarMonthStats(key) {
+  const all = savingsTransfers(TX);
+  const entries = all.filter(t => String(t.date || '').slice(0,7) === key);
+  const deposits = entries.filter(t => t.direction !== 'withdrawal');
+  const withdrawals = entries.filter(t => t.direction === 'withdrawal');
+  const added = sum(deposits), taken = sum(withdrawals), net = added - taken;
+  const opening = savingsBalance(all.filter(t => String(t.date || '') < key + '-01'));
+  const closing = opening + net;
+  const largest = deposits.slice().sort((a,b)=>Number(b.amount||0)-Number(a.amount||0))[0] || null;
+  return {
+    key, entries, deposits, withdrawals, added, taken, net, opening, closing,
+    additions: deposits.length,
+    withdrawalsCount: withdrawals.length,
+    average: deposits.length ? added / deposits.length : 0,
+    largest
+  };
+}
+function setJarMonthKey(key) {
+  if (!/^\d{4}-\d{2}$/.test(String(key))) return;
+  S.jmo = Math.min(0, monthOffsetForKey(key));
+  S.jarTab = 'monthly';
+  savingsJarView();
+}
+function jarTabs() {
+  return `<div class="jar-tabs">${[
+    ['overview','Overview'],['monthly','Monthly'],['history','History']
+  ].map(([k,l])=>`<button class="${S.jarTab===k?'on':''}" onclick="S.jarTab='${k}';savingsJarView()">${l}</button>`).join('')}</div>`;
+}
+function jarEntryList(list, emptyTitle = 'No Savings Jar activity') {
+  return list.length ? `<div class="card detail-list">${list.map(txRow).join('')}</div>` : empty('🪙', emptyTitle, 'Jar transfers will appear here.');
+}
+function savingsJarView(tab = S.jarTab) {
+  S.jarTab = ['overview','monthly','history'].includes(tab) ? tab : 'overview';
+  const all = savingsTransfers(TX).slice().sort((a,b) => b.date.localeCompare(a.date) || String(b.time || '').localeCompare(String(a.time || '')));
   const jar = savingsBalance(), cash = fundBalance('cash');
-  sheet(`<div class="detail-head"><div><h2 style="margin:0">🪙 Savings Jar</h2><div class="mut">Coins kept aside from spendable cash</div></div></div>
-    <div class="card savings-summary"><span class="mut">In the jar</span><div class="detail-total savings-total">${eur(jar)}</div><div class="mut">Cash available: ${eur(cash)}</div></div>
+  const lifetimeDeposits = all.filter(t => t.direction !== 'withdrawal');
+  const lifetimeWithdrawals = all.filter(t => t.direction === 'withdrawal');
+  const lifetimeAdded = sum(lifetimeDeposits), lifetimeTaken = sum(lifetimeWithdrawals);
+  const avgDeposit = lifetimeDeposits.length ? lifetimeAdded / lifetimeDeposits.length : 0;
+  const largest = lifetimeDeposits.slice().sort((a,b)=>Number(b.amount||0)-Number(a.amount||0))[0] || null;
+  const keys = jarMonthKeys();
+  const monthStats = keys.map(jarMonthStats);
+  const best = monthStats.slice().sort((a,b)=>b.net-a.net)[0] || jarMonthStats(TODAY.slice(0,7));
+  const current = jarMonthStats(TODAY.slice(0,7));
+  const trend = monthStats.slice(-8);
+
+  let body = '';
+  if (S.jarTab === 'overview') {
+    body = `
+      <div class="card savings-summary jar-hero">
+        <div><span class="mut">In the jar</span><div class="detail-total savings-total">${eur(jar)}</div><div class="mut">Cash available: ${eur(cash)}</div></div>
+        <div class="jar-hero-side"><span class="mut">Lifetime added</span><b>${eur(lifetimeAdded)}</b><span class="mut">Taken out ${eur(lifetimeTaken)}</span></div>
+      </div>
+      <div class="grid2 jar-kpis">
+        <div class="card stat"><span class="mut">Added this month</span><b class="income-amt">${eur(current.added)}</b></div>
+        <div class="card stat"><span class="mut">Net this month</span><b class="${current.net>=0?'income-amt':'up'}">${current.net>=0?'+':''}${eur(current.net)}</b></div>
+        <div class="card stat"><span class="mut">Average addition</span><b>${eur(avgDeposit)}</b></div>
+        <div class="card stat"><span class="mut">Largest addition</span><b>${largest?eur(largest.amount):'—'}</b></div>
+      </div>
+      <div class="card"><div class="row sp"><div><span class="mut">Best saving month</span><h2 style="margin:2px 0 0">${best.net>0?monthName(best.key):'—'}</h2></div><b class="jar-highlight">${best.net>0?'+'+eur(best.net):'—'}</b></div><p class="mut">Based on net jar growth (added minus taken out).</p></div>
+      <div class="card"><h2>Amount added by month</h2><p class="mut">Last ${trend.length} month${trend.length===1?'':'s'}</p>${bars(trend.map(x=>x.added),trend.map(x=>monthName(x.key).slice(0,3)),'var(--ok)')}</div>
+      <div class="card"><h2>Jar balance over time</h2>${bars(trend.map(x=>Math.max(0,x.closing)),trend.map(x=>monthName(x.key).slice(0,3)))}</div>
+      <div class="card"><div class="row sp"><h2>Recent jar activity</h2><button class="detail-link" onclick="S.jarTab='history';savingsJarView()">See all ›</button></div>${all.slice(0,5).map(txRow).join('') || '<p class="mut">No jar activity yet.</p>'}</div>`;
+  } else if (S.jarTab === 'monthly') {
+    const selectedRaw = monthKey(Math.min(0, Number(S.jmo || 0)));
+    const selectedKey = keys.includes(selectedRaw) ? selectedRaw : keys[0];
+    if (selectedKey !== selectedRaw) S.jmo = monthOffsetForKey(selectedKey);
+    const idx = keys.indexOf(selectedKey), st = jarMonthStats(selectedKey);
+    const canOlder = idx > 0, canNewer = idx >= 0 && idx < keys.length-1;
+    const days = selectedKey === TODAY.slice(0,7) ? Number(TODAY.slice(8)) : daysInMonthKey(selectedKey);
+    const addVals = Array.from({length:days},(_,i)=>sum(st.deposits.filter(t=>Number(t.date.slice(8))===i+1)));
+    const takeVals = Array.from({length:days},(_,i)=>sum(st.withdrawals.filter(t=>Number(t.date.slice(8))===i+1)));
+    const labs = addVals.map((_,i)=>i===0 || (i+1)%5===0 || i===days-1 ? String(i+1) : '');
+    body = `
+      <div class="analytics-month-nav jar-month-nav">
+        <button class="icon-btn" ${canOlder?'':'disabled'} onclick="if(${canOlder}){S.jmo--;savingsJarView()}">‹</button>
+        <select aria-label="Savings month" onchange="setJarMonthKey(this.value)">${keys.slice().reverse().map(k=>`<option value="${k}" ${k===selectedKey?'selected':''}>${monthName(k)}${k===TODAY.slice(0,7)?' · Current':''}</option>`).join('')}</select>
+        <button class="icon-btn" ${canNewer?'':'disabled'} onclick="if(${canNewer}){S.jmo++;savingsJarView()}">›</button>
+      </div>
+      <div class="grid2 jar-kpis">
+        <div class="card stat"><span class="mut">Opening balance</span><b>${eur(st.opening)}</b></div>
+        <div class="card stat"><span class="mut">Closing balance</span><b>${eur(st.closing)}</b></div>
+        <div class="card stat"><span class="mut">Added</span><b class="income-amt">${eur(st.added)}</b></div>
+        <div class="card stat"><span class="mut">Taken out</span><b class="up">${eur(st.taken)}</b></div>
+        <div class="card stat"><span class="mut">Net saved</span><b class="${st.net>=0?'income-amt':'up'}">${st.net>=0?'+':''}${eur(st.net)}</b></div>
+        <div class="card stat"><span class="mut">Additions</span><b>${st.additions}</b></div>
+        <div class="card stat"><span class="mut">Avg addition</span><b>${eur(st.average)}</b></div>
+        <div class="card stat"><span class="mut">Largest addition</span><b>${st.largest?eur(st.largest.amount):'—'}</b></div>
+      </div>
+      <div class="card"><h2>Daily amount saved · ${monthName(selectedKey)}</h2>${bars(addVals,labs,'var(--ok)')}</div>
+      ${st.taken>0?`<div class="card"><h2>Daily amount taken out</h2>${bars(takeVals,labs,'var(--warn)')}</div>`:''}
+      <div class="card"><div class="row sp"><h2>${monthName(selectedKey)} activity</h2><span class="mut">${st.entries.length} entries</span></div>${st.entries.slice().sort((a,b)=>b.date.localeCompare(a.date)||String(b.time||'').localeCompare(String(a.time||''))).map(txRow).join('') || '<p class="mut">No jar activity this month.</p>'}</div>`;
+  } else {
+    const filter = ['all','deposit','withdrawal'].includes(S.jf) ? S.jf : 'all';
+    const filtered = filter === 'all' ? all : all.filter(t => filter === 'deposit' ? t.direction !== 'withdrawal' : t.direction === 'withdrawal');
+    body = `
+      <div class="chips jar-history-filter">
+        <button class="pill ${filter==='all'?'on':''}" onclick="S.jf='all';savingsJarView()">All</button>
+        <button class="pill ${filter==='deposit'?'on':''}" onclick="S.jf='deposit';savingsJarView()">Added</button>
+        <button class="pill ${filter==='withdrawal'?'on':''}" onclick="S.jf='withdrawal';savingsJarView()">Taken out</button>
+      </div>
+      <div class="card jar-history-summary"><div class="row sp"><span class="mut">Entries shown</span><b>${filtered.length}</b></div><div class="row sp"><span class="mut">Added</span><b class="income-amt">${eur(sum(filtered.filter(t=>t.direction!=='withdrawal')))}</b></div><div class="row sp"><span class="mut">Taken out</span><b class="up">${eur(sum(filtered.filter(t=>t.direction==='withdrawal')))}</b></div></div>
+      ${jarEntryList(filtered)}`;
+  }
+
+  sheet(`<div class="detail-head jar-title"><div><h2 style="margin:0">🪙 Savings Jar</h2><div class="mut">Savings performance, monthly breakdown and history</div></div></div>
     <div class="btns savings-actions"><button class="btn" onclick="savingsForm(null,'deposit')">Add coins</button><button class="btn sec" ${jar > 0 ? '' : 'disabled'} onclick="savingsForm(null,'withdrawal')">Take from jar</button></div>
-    <div class="card detail-list" style="margin-top:14px">${l.map(txRow).join('') || empty('🪙','Your jar is empty','Add your first coins to start tracking the jar.')}</div>`, true);
+    ${jarTabs()}
+    <div class="jar-tab-body">${body}</div>`, true);
 }
 
 function savingsForm(id, direction = 'deposit') {

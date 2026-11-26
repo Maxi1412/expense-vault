@@ -193,3 +193,12 @@ input[type=color]{padding:5px;height:50px}.rgrid button{min-width:0;overflow:hid
 .export-period-card b{display:block;font-size:18px;margin:3px 0}
 .export-note{margin:12px 2px 0}
 @media(max-width:360px){.analytics-export-btn{padding:8px 11px;font-size:13px}}
+
+/* Revolut and transfers */
+.hero-money-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+.hero-money-grid span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.hero-money-grid b{font-size:15px;overflow-wrap:anywhere}
+.transfer-balances .row{min-height:32px}
+.transfer-balances .row+.row{border-top:1px solid var(--line)}
+.transfer-amt{color:var(--acc)}
+@media(max-width:390px){.hero-money-grid{grid-template-columns:1fr 1fr}.hero-money-grid span:last-child{grid-column:1/-1}}

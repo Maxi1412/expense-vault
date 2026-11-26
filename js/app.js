@@ -618,6 +618,7 @@ function toast(m) { sheet(`<h2>${esc(m)}</h2><button class="btn" onclick="closeS
 function addChoose() {
   draft = null;
   sheet(`<h2>Add transaction</h2><button class="choice" onclick="incomeForm()"><span class="ico" style="background:#1f9d6322">💶</span><span><b>Add Income</b><br><span class="mut">Salary, tips, private work or other income</span></span></button>
+  <button class="choice" onclick="transferForm()"><span class="ico" style="background:#536fb822">↔️</span><span><b>Transfer Money</b><br><span class="mut">Move money between Bank/Card, Cash and Revolut</span></span></button>
   <button class="choice" onclick="savingsForm()"><span class="ico savings-ico">🪙</span><span><b>Savings Jar</b><br><span class="mut">Move coins from Cash into your savings jar</span></span></button>
   <button class="choice" onclick="pick('photo')"><span class="ico" style="background:var(--acc2)">📷</span><span><b>Take Photo</b><br><span class="mut">Snap an expense receipt or invoice</span></span></button>
   <button class="choice" onclick="pick('upload')"><span class="ico" style="background:var(--acc2)">🖼️</span><span><b>Upload Receipt</b><br><span class="mut">Choose an existing expense image</span></span></button>
@@ -1008,6 +1009,7 @@ function setMyShare(fraction) {
 function txForm(id, d) {
   if (id && store.get(id)?.type === 'income') return incomeForm(id, store.get(id));
   if (id && store.get(id)?.type === 'savings') return savingsForm(id, store.get(id)?.direction || 'deposit');
+  if (id && store.get(id)?.type === 'transfer') return transferForm(id, store.get(id));
   const t = id ? store.get(id) : d || { date: TODAY, payment: 'Debit Card', fund: 'card', category: 'Groceries', notes: '', subcategory: '' };
   t.fund = fundOf(t);
   const o = (a, v) => a.map(x => `<option value="${esc(x)}" ${x === v ? 'selected' : ''}>${esc(x)}</option>`).join('');
@@ -1022,7 +1024,7 @@ function txForm(id, d) {
   <div class="grid2"><div><label for="ftax">Receipt Tax / VAT (optional)</label><input id="ftax" type="number" inputmode="decimal" step="0.01" min="0" value="${Number(t.taxTotal || 0) ? t.taxTotal : ''}" placeholder="Auto-detected"></div><div><label>Tax rate</label><input value="${(t.taxRates || []).length ? esc(t.taxRates.join(', ') + '%') : ''}" placeholder="Auto-detected" readonly></div></div>
   <label for="fm">Merchant / Payee</label><input id="fm" value="${esc(t.merchant || '')}" placeholder="e.g. Mercadona">
   <div class="grid2"><div><label for="fd">Date</label><input id="fd" type="date" value="${t.date || TODAY}"></div><div><label for="ftime">Time</label><input id="ftime" type="time" value="${esc(t.time || '')}"></div></div>
-  <div class="grid2"><div><label for="fpay">Payment</label><select id="fpay" onchange="syncFundFromPayment('fpay','ffund')">${o(PAYMENTS, t.payment)}</select></div><div><label for="ffund">Paid from</label><select id="ffund"><option value="card" ${t.fund==='card'?'selected':''}>Bank / Card</option><option value="cash" ${t.fund==='cash'?'selected':''}>Cash</option></select></div></div>
+  <div class="grid2"><div><label for="fpay">Payment</label><select id="fpay" onchange="syncFundFromPayment('fpay','ffund')">${o(PAYMENTS, t.payment)}</select></div><div><label for="ffund">Paid from</label><select id="ffund"><option value="card" ${t.fund==='card'?'selected':''}>Bank / Card</option><option value="cash" ${t.fund==='cash'?'selected':''}>Cash</option><option value="revolut" ${t.fund==='revolut'?'selected':''}>Revolut</option></select></div></div>
   <label for="fcat">Category</label><select id="fcat">${o(CATS.map(c => c.name), t.category)}</select>
   <label for="fsub">Subcategory (optional)</label><input id="fsub" value="${esc(t.subcategory || '')}">
   <label for="fn">Notes</label><textarea id="fn" rows="2">${esc(t.notes || '')}</textarea>
@@ -1077,7 +1079,7 @@ function incomeForm(id, d) {
   <label for="ia">Amount received</label><input id="ia" class="amt-in" type="number" inputmode="decimal" step="0.01" placeholder="0.00" value="${t.amount ?? ''}">
   <label for="im">Source / Payer</label><input id="im" value="${esc(t.merchant || '')}" placeholder="e.g. Salary, Restaurant tips, Private client">
   <div class="grid2"><div><label for="idate">Date received</label><input id="idate" type="date" value="${t.date || TODAY}"></div><div><label for="ipay">Received via</label><select id="ipay" onchange="syncFundFromPayment('ipay','ifund')">${o(PAYMENTS, t.payment)}</select></div></div>
-  <label for="ifund">Money available as</label><select id="ifund"><option value="card" ${t.fund==='card'?'selected':''}>Bank / Card</option><option value="cash" ${t.fund==='cash'?'selected':''}>Cash</option></select>
+  <label for="ifund">Money available as</label><select id="ifund"><option value="card" ${t.fund==='card'?'selected':''}>Bank / Card</option><option value="cash" ${t.fund==='cash'?'selected':''}>Cash</option><option value="revolut" ${t.fund==='revolut'?'selected':''}>Revolut</option></select>
   <label for="icat">Income category</label><select id="icat">${o(INCOME_CATS.map(c => c.name), t.category)}</select>
   <label for="inotes">Notes</label><textarea id="inotes" rows="2">${esc(t.notes || '')}</textarea>
   ${id && t.receiptId ? `<label for="iproof">Replace attachment (optional)</label><input id="iproof" type="file" accept="image/*"><label class="check"><input id="iremove" type="checkbox"> Remove current attachment</label>` : '<label for="iproof">Payslip / proof image (optional)</label><input id="iproof" type="file" accept="image/*" capture="environment">'}

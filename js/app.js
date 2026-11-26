@@ -1112,6 +1112,64 @@ async function saveIncome(id) {
   } catch (e) { const err = $('#ierr'); if (err) err.textContent = 'Could not save this income. ' + (e.message || ''); }
 }
 
+
+/* ---------- account transfers ---------- */
+function fundOptions(selected) {
+  return [
+    ['card','Bank / Card'],
+    ['cash','Cash'],
+    ['revolut','Revolut']
+  ].map(([v,l])=>`<option value="${v}" ${selected===v?'selected':''}>${l}</option>`).join('');
+}
+function transferForm(id, d) {
+  const old = id ? store.get(id) : null;
+  const t = old || d || { fromFund:'card', toFund:'revolut', date:TODAY, time:new Date().toTimeString().slice(0,5), amount:'', notes:'' };
+  sheet(`<h2>${id?'Edit transfer':'Transfer money'}</h2>
+    <div class="card transfer-balances">
+      <div class="row sp"><span class="mut">Bank / Card</span><b>${eur(fundBalance('card'))}</b></div>
+      <div class="row sp"><span class="mut">Cash</span><b>${eur(fundBalance('cash'))}</b></div>
+      <div class="row sp"><span class="mut">Revolut</span><b>${eur(fundBalance('revolut'))}</b></div>
+    </div>
+    <div class="grid2"><div><label for="tfrom">From</label><select id="tfrom">${fundOptions(t.fromFund || 'card')}</select></div><div><label for="tto">To</label><select id="tto">${fundOptions(t.toFund || 'revolut')}</select></div></div>
+    <label for="ta">Amount</label><input id="ta" class="amt-in" type="number" inputmode="decimal" step="0.01" min="0.01" placeholder="0.00" value="${t.amount ?? ''}">
+    <div class="grid2"><div><label for="tdate">Date</label><input id="tdate" type="date" value="${t.date || TODAY}"></div><div><label for="ttime">Time</label><input id="ttime" type="time" value="${esc(t.time || '')}"></div></div>
+    <label for="tnotes">Notes (optional)</label><textarea id="tnotes" rows="2" placeholder="e.g. Transfer to Revolut for Thailand debt payment">${esc(t.notes || '')}</textarea>
+    <p class="mut">Transfers only move money between your own balances. They are not counted as income or expenses.</p>
+    <p id="terr" class="up" role="alert"></p>
+    <button class="btn" onclick="saveTransfer('${id || ''}')">${id?'Save changes':'Save Transfer'}</button>`, true);
+}
+async function saveTransfer(id) {
+  const amount = parseFloat($('#ta')?.value), fromFund=$('#tfrom')?.value, toFund=$('#tto')?.value;
+  if (!(amount > 0)) { $('#terr').textContent='Enter an amount greater than zero.'; return; }
+  if (!['card','cash','revolut'].includes(fromFund) || !['card','cash','revolut'].includes(toFund)) { $('#terr').textContent='Choose valid accounts.'; return; }
+  if (fromFund === toFund) { $('#terr').textContent='From and To must be different.'; return; }
+  const old=id?store.get(id):null, now=new Date().toISOString();
+  const t={
+    id:id||uid('t'), type:'transfer', fromFund, toFund,
+    date:$('#tdate')?.value||TODAY, time:$('#ttime')?.value||old?.time||new Date().toTimeString().slice(0,5),
+    merchant:'Transfer', amount, category:'Transfer', subcategory:transferLabel({fromFund,toFund}),
+    payment:'Transfer', fund:fromFund, notes:$('#tnotes')?.value.trim()||'',
+    receiptId:null, ocrText:'', created:old?.created||now, modified:now
+  };
+  try {
+    await store.save(t);
+    S.mo=monthOffsetForDate(t.date);
+    sheet(`<div style="text-align:center;padding:24px 0"><div style="font-size:54px">↔️</div><h2>Transfer saved</h2><p>${eur(amount)} · ${esc(transferLabel(t))}</p><p class="mut">This transfer did not affect income or spending.</p></div><button class="btn" onclick="closeSheet();go('home')">Done</button>`);
+  } catch(e) {
+    const err=$('#terr'); if(err) err.textContent='Could not save this transfer. '+(e.message||'');
+  }
+}
+function transferDetail(t) {
+  sheet(`<div class="row">${txCatIco(t)}<div class="grow"><h2 style="margin:0">Transfer</h2><span class="mut">${esc(transferLabel(t))}</span></div></div>
+    <div class="big" style="margin:12px 0">${eur(t.amount)}</div>
+    <div class="card">${[
+      ['Type','Internal transfer'],['From',fundLabel(t.fromFund)],['To',fundLabel(t.toFund)],
+      ['Date',fdl(t.date)+' · '+(t.time||'')],['Notes',t.notes||'—'],
+      ['Created',fd(t.created.slice(0,10))],['Last edited',fd(t.modified.slice(0,10))]
+    ].map(([a,b])=>`<div class="row sp detail-row"><span class="mut">${a}</span><span>${esc(b)}</span></div>`).join('')}</div>
+    <div class="btns"><button class="btn sec" onclick="transferForm('${t.id}')">Edit</button><button class="btn del" onclick="confirmDel('${t.id}')">Delete</button></div>`, true);
+}
+
 /* ---------- savings jar ---------- */
 function jarMonthKeys() {
   const current = TODAY.slice(0,7);

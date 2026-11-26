@@ -851,6 +851,7 @@ function detectPaymentMethod(raw) {
   if (/(direct\s*debit|domiciliaci[oó]n|recibo\s+domiciliado|lastschrift|sepa\s+lastschrift)/i.test(s)) return 'Direct Debit';
   if (/(bank\s*transfer|transferencia|wire\s+transfer|bank[üu]berweisung|[üu]berweisung|sepa\s+(?:transfer|credit)|bizum)/i.test(s)) return 'Bank Transfer';
 
+  if (/\brevolut\b/i.test(s)) return 'Revolut';
   if (/(credit\s*card|tarjeta\s+(?:de\s+)?cr[eé]dito|kreditkarte)/i.test(s)) return 'Credit Card';
   if (/(debit\s*card|tarjeta\s+(?:de\s+)?d[eé]bito|debitkarte|ec[-\s]?karte|girocard)/i.test(s)) return 'Debit Card';
 

@@ -1506,15 +1506,18 @@ function analysisExportPeriod() {
 function analysisExportData() {
   const period = analysisExportPeriod();
   const list = TX.filter(t => t.date >= period.from && t.date <= period.to).slice().sort((a,b)=>a.date.localeCompare(b.date)||String(a.time||'').localeCompare(String(b.time||'')));
-  const ex = expenses(list), incs = incomes(list), jar = savingsTransfers(list);
+  const ex = expenses(list), incs = incomes(list), jar = savingsTransfers(list), transfers = list.filter(t=>t.type==='transfer');
   const categories = Object.entries(ex.reduce((m,t)=>(m[t.category]=(m[t.category]||0)+Number(t.amount||0),m),{})).sort((a,b)=>b[1]-a[1]).map(([category,amount])=>({category,amount}));
   const incomeCategories = Object.entries(incs.reduce((m,t)=>(m[t.category]=(m[t.category]||0)+Number(t.amount||0),m),{})).sort((a,b)=>b[1]-a[1]).map(([category,amount])=>({category,amount}));
   const merchants = Object.entries(ex.reduce((m,t)=>(m[t.merchant]=(m[t.merchant]||0)+Number(t.amount||0),m),{})).sort((a,b)=>b[1]-a[1]).map(([merchant,amount])=>({merchant,amount}));
   const paymentMethods = Object.entries(ex.reduce((m,t)=>(m[t.payment||'Other']=(m[t.payment||'Other']||0)+Number(t.amount||0),m),{})).sort((a,b)=>b[1]-a[1]).map(([payment,amount])=>({payment,amount}));
-  const locations = [
-    { location:'Bank / Card', income:incomeSum(list.filter(t=>fundOf(t)==='card')), expenses:expenseSum(list.filter(t=>fundOf(t)==='card')) },
-    { location:'Cash', income:incomeSum(list.filter(t=>fundOf(t)==='cash')), expenses:expenseSum(list.filter(t=>fundOf(t)==='cash')) }
-  ];
+  const locations = ['card','cash','revolut'].map(fund => ({
+    location:fundLabel(fund),
+    income:incomeSum(list.filter(t=>t.type!=='transfer' && fundOf(t)===fund)),
+    expenses:expenseSum(list.filter(t=>t.type!=='transfer' && fundOf(t)===fund)),
+    transfersIn:sum(transfers.filter(t=>t.toFund===fund)),
+    transfersOut:sum(transfers.filter(t=>t.fromFund===fund))
+  }));
   const totalTax = ex.reduce((n,t)=>n+Number(t.personalTax ?? t.taxTotal ?? 0),0);
   const attachmentCount = list.filter(t=>t.receiptId).length;
   const savingsAdded = sum(jar.filter(t=>t.direction!=='withdrawal'));
@@ -1534,6 +1537,8 @@ function analysisExportData() {
       expenseCount:ex.length,
       incomeCount:incs.length,
       savingsTransferCount:jar.length,
+      internalTransferCount:transfers.length,
+      internalTransferVolume:sum(transfers),
       savingsAdded,
       savingsTaken,
       savingsNet:savingsAdded-savingsTaken,
@@ -1548,7 +1553,7 @@ function analysisExportData() {
     transactions:list.map(t=>({
       id:t.id,
       type:t.type || 'expense',
-      direction:t.type==='savings' ? (t.direction || 'deposit') : '',
+      direction:t.type==='savings' ? (t.direction || 'deposit') : t.type==='transfer' ? transferLabel(t) : '',
       date:t.date,
       time:t.time || '',
       merchantOrSource:t.merchant || '',
@@ -1560,7 +1565,9 @@ function analysisExportData() {
       category:t.category || '',
       subcategory:t.subcategory || '',
       payment:t.payment || '',
-      moneyLocation:t.type==='savings' ? 'Cash ↔ Savings Jar' : fundLabel(fundOf(t)),
+      moneyLocation:t.type==='savings' ? 'Cash ↔ Savings Jar' : t.type==='transfer' ? transferLabel(t) : fundLabel(fundOf(t)),
+      fromFund:t.type==='transfer' ? fundLabel(t.fromFund) : '',
+      toFund:t.type==='transfer' ? fundLabel(t.toFund) : '',
       notes:t.notes || '',
       hasAttachment:Boolean(t.receiptId),
       receiptId:t.receiptId || null,
@@ -1601,6 +1608,7 @@ function exportAnalysisText() {
     'Expenses: '+eur(s.expenses),
     'Net result: '+eur(s.net),
     'Transactions: '+s.transactionCount,
+    'Internal transfers: '+s.internalTransferCount+' · '+eur(s.internalTransferVolume),
     'Savings Jar added: '+eur(s.savingsAdded),
     'Savings Jar taken out: '+eur(s.savingsTaken),
     'Savings Jar net change: '+eur(s.savingsNet),
@@ -1644,6 +1652,8 @@ async function exportAnalysisExcel() {
       {Metric:'Expenses',Value:s.expenses},
       {Metric:'Net result',Value:s.net},
       {Metric:'Transactions',Value:s.transactionCount},
+      {Metric:'Internal transfers',Value:s.internalTransferCount},
+      {Metric:'Internal transfer volume',Value:s.internalTransferVolume},
       {Metric:'Savings Jar added',Value:s.savingsAdded},
       {Metric:'Savings Jar taken out',Value:s.savingsTaken},
       {Metric:'Savings Jar net change',Value:s.savingsNet},
@@ -1651,7 +1661,7 @@ async function exportAnalysisExcel() {
       {Metric:'Attachments',Value:s.attachments}
     ];
     const txRows=d.transactions.map(t=>({
-      Type:t.type,Direction:t.direction,Date:t.date,Time:t.time,
+      Type:t.type,Direction:t.direction,'From Account':t.fromFund,'To Account':t.toFund,Date:t.date,Time:t.time,
       'Merchant / Source':t.merchantOrSource,Amount:t.amount,'Receipt Total':t.receiptTotal ?? '',
       Subtotal:t.subtotal ?? '',Tax:t.tax ?? '','Tax Rate(s)':Array.isArray(t.taxRates)?t.taxRates.join(', '):'',
       Category:t.category,Subcategory:t.subcategory,Payment:t.payment,'Money Location':t.moneyLocation,
@@ -1663,7 +1673,7 @@ async function exportAnalysisExcel() {
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.incomeCategories.map(x=>({Category:x.category,Amount:x.amount}))),'Income Categories');
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.merchants.map(x=>({Merchant:x.merchant,Amount:x.amount}))),'Merchants');
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.paymentMethods.map(x=>({Payment:x.payment,Amount:x.amount}))),'Payments');
-    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.moneyLocations.map(x=>({'Money Location':x.location,Income:x.income,Expenses:x.expenses,Net:x.income-x.expenses}))),'Money Locations');
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.moneyLocations.map(x=>({'Money Location':x.location,Income:x.income,Expenses:x.expenses,'Transfers In':x.transfersIn,'Transfers Out':x.transfersOut,'Net Activity':x.income-x.expenses+x.transfersIn-x.transfersOut}))),'Money Locations');
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.transactions.filter(t=>t.type==='savings').map(t=>({Date:t.date,Time:t.time,Direction:t.direction,Amount:t.amount,Notes:t.notes}))),'Savings Jar');
     XLSX.writeFile(wb,analysisExportFilename('xlsx'));
     toast('Excel analysis downloaded.');

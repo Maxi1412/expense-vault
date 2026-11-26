@@ -379,7 +379,7 @@ function receiptUrl(id) {
 }
 
 function fundActivity(fund) {
-  const l = TX.filter(t => fundOf(t) === fund).sort((a,b) => b.date.localeCompare(a.date) || String(b.time || '').localeCompare(String(a.time || '')));
+  const l = TX.filter(t => t.type === 'transfer' ? (t.fromFund === fund || t.toFund === fund) : fundOf(t) === fund).sort((a,b) => b.date.localeCompare(a.date) || String(b.time || '').localeCompare(String(a.time || '')));
   const bal = fundBalance(fund, l);
   sheet(`<div class="detail-head"><div><h2 style="margin:0">${fundLabel(fund)}</h2><div class="mut">Current available balance</div></div></div>
     <div class="card detail-summary"><div><span class="mut">Available</span><div class="detail-total ${bal >= 0 ? 'income-amt' : 'up'}">${eur(bal)}</div></div><div class="mut">${l.length} transaction${l.length===1?'':'s'}</div></div>
@@ -387,13 +387,14 @@ function fundActivity(fund) {
 }
 
 function availableMoneyOverview() {
-  const card = fundBalance('card'), cash = fundBalance('cash'), jar = savingsBalance(), total = card + cash;
+  const card = fundBalance('card'), cash = fundBalance('cash'), revolut = fundBalance('revolut'), jar = savingsBalance(), total = card + cash + revolut;
   const recent = TX.slice().sort((a,b) => b.date.localeCompare(a.date) || String(b.time || '').localeCompare(String(a.time || ''))).slice(0,10);
   sheet(`<div class="detail-head"><div><h2 style="margin:0">Available money</h2><div class="mut">Current balance across all recorded transactions</div></div></div>
     <div class="card available-total"><span class="mut">Total available to spend</span><div class="detail-total ${total >= 0 ? 'income-amt' : 'up'}">${eur(total)}</div><div class="mut">Total including Savings Jar: ${eur(total + jar)}</div></div>
     <div class="money-location-grid" style="margin-bottom:14px">
       <button onclick="fundActivity('card')"><span class="money-loc-icon">💳</span><span class="mut">Bank / Card</span><b>${eur(card)}</b><span class="tap-more">View activity ›</span></button>
       <button onclick="fundActivity('cash')"><span class="money-loc-icon">💶</span><span class="mut">Cash</span><b>${eur(cash)}</b><span class="tap-more">View activity ›</span></button>
+      <button onclick="fundActivity('revolut')"><span class="money-loc-icon">💠</span><span class="mut">Revolut</span><b>${eur(revolut)}</b><span class="tap-more">View activity ›</span></button>
       <button class="savings-loc" onclick="savingsJarView()"><span class="money-loc-icon">🪙</span><span class="mut">Savings Jar</span><b>${eur(jar)}</b><span class="tap-more">View jar ›</span></button>
     </div>
     <div class="card"><div class="row sp"><h2>Recent activity</h2><button class="detail-link" onclick="closeSheet();go('tx')">See all ›</button></div>${recent.map(txRow).join('') || '<p class="mut">No activity yet.</p>'}</div>`, true);
@@ -521,7 +522,7 @@ function dailySpendingBreakdown(key) {
 /* ---------- home ---------- */
 function home() {
   const k = monthKey(S.mo), cur = S.mo === 0, l = inMonth(k), out = expenseSum(l), inc = incomeSum(l), monthlyNet = inc - out, budget = Number(SETTINGS.monthlyBudget || 0), rem = budget - out;
-  const cardAvailable = fundBalance('card'), cashAvailable = fundBalance('cash'), jarSaved = savingsBalance(), totalAvailable = cardAvailable + cashAvailable;
+  const cardAvailable = fundBalance('card'), cashAvailable = fundBalance('cash'), revolutAvailable = fundBalance('revolut'), jarSaved = savingsBalance(), totalAvailable = cardAvailable + cashAvailable + revolutAvailable;
   const days = cur ? Math.max(1, +TODAY.slice(8)) : new Date(+k.slice(0, 4), +k.slice(5), 0).getDate();
   const pk = monthKey(S.mo - 1), pl = expenses(inMonth(pk)).filter(t => +t.date.slice(8) <= days), ps = sum(pl), ch = ps ? (out - ps) / ps * 100 : 0;
   const wk = between(add(TODAY, -6), TODAY), dim = new Date(+k.slice(0, 4), +k.slice(5), 0).getDate();
@@ -531,7 +532,7 @@ function home() {
   <div class="card hero"><div class="row sp"><span>Total available</span><button class="icon-btn hero-search" aria-label="Search" onclick="gsearch()">⌕</button></div>
   <button class="hero-summary" onclick="availableMoneyOverview()" aria-label="Open available money breakdown">
     <div class="big">${eur(totalAvailable)}</div>
-    <div class="row sp hero-money-row"><span>Bank / Card <b>${eur(cardAvailable)}</b></span><span>Cash <b>${eur(cashAvailable)}</b></span></div>
+    <div class="hero-money-grid"><span>Bank / Card <b>${eur(cardAvailable)}</b></span><span>Cash <b>${eur(cashAvailable)}</b></span><span>Revolut <b>${eur(revolutAvailable)}</b></span></div>
     <div class="hero-month-flow">This month: Income ${eur(inc)} · Expenses ${eur(out)} · Net ${eur(monthlyNet)}</div>
     <span class="hero-breakdown-label">View balance breakdown ›</span>
   </button></div>
@@ -540,6 +541,7 @@ function home() {
     <div class="money-location-grid">
       <button onclick="fundActivity('card')"><span class="money-loc-icon">💳</span><span class="mut">Bank / Card</span><b>${eur(fundBalance('card'))}</b><span class="tap-more">View activity ›</span></button>
       <button onclick="fundActivity('cash')"><span class="money-loc-icon">💶</span><span class="mut">Cash</span><b>${eur(fundBalance('cash'))}</b><span class="tap-more">View activity ›</span></button>
+      <button onclick="fundActivity('revolut')"><span class="money-loc-icon">💠</span><span class="mut">Revolut</span><b>${eur(fundBalance('revolut'))}</b><span class="tap-more">View activity ›</span></button>
       <button class="savings-loc" onclick="savingsJarView()"><span class="money-loc-icon">🪙</span><span class="mut">Savings Jar</span><b>${eur(jarSaved)}</b><span class="tap-more">Manage jar ›</span></button>
     </div>
   </div>

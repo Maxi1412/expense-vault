@@ -43,11 +43,23 @@ const savingsTransfers = l => l.filter(t => t.type === 'savings');
 const expenseSum = l => sum(expenses(l));
 const incomeSum = l => sum(incomes(l));
 const savingsBalance = (list = TX) => savingsTransfers(list).reduce((total, t) => total + (t.direction === 'withdrawal' ? -1 : 1) * Number(t.amount || 0), 0);
-const fundFromPayment = payment => String(payment || '').toLowerCase() === 'cash' ? 'cash' : 'card';
-const fundOf = t => t?.fund === 'cash' || t?.fund === 'card' ? t.fund : fundFromPayment(t?.payment);
-const fundLabel = fund => fund === 'cash' ? 'Cash' : 'Bank / Card';
-const fundBalance = (fund, list = TX) => list.filter(t => fundOf(t) === fund).reduce((total, t) => {
+const fundFromPayment = payment => {
+  const p = String(payment || '').toLowerCase();
+  if (p === 'cash') return 'cash';
+  if (p === 'revolut') return 'revolut';
+  return 'card';
+};
+const fundOf = t => ['cash','card','revolut'].includes(t?.fund) ? t.fund : fundFromPayment(t?.payment);
+const fundLabel = fund => fund === 'cash' ? 'Cash' : fund === 'revolut' ? 'Revolut' : 'Bank / Card';
+const transferLabel = t => fundLabel(t?.fromFund) + ' → ' + fundLabel(t?.toFund);
+const fundBalance = (fund, list = TX) => list.reduce((total, t) => {
   const a = Number(t.amount || 0);
+  if (t.type === 'transfer') {
+    if (t.fromFund === fund) total -= a;
+    if (t.toFund === fund) total += a;
+    return total;
+  }
+  if (fundOf(t) !== fund) return total;
   if (t.type === 'income') return total + a;
   if ((t.type || 'expense') === 'expense') return total - a;
   if (t.type === 'savings' && fund === 'cash') return total + (t.direction === 'withdrawal' ? a : -a);
@@ -60,7 +72,7 @@ function syncFundFromPayment(payId, fundId) {
 const eur = n => new Intl.NumberFormat('en-IE', { style: 'currency', currency: PROFILE.currency || 'EUR' }).format(Number(n || 0));
 const cat = n => CATS.find(c => c.name === n) || CATS.find(c => c.name === 'Other') || { name: n || 'Other', icon: '📦', color: '#8b8f98' };
 const incomeCat = n => INCOME_CATS.find(c => c.name === n) || INCOME_CATS.find(c => c.name === 'Other Income') || { name: n || 'Other Income', icon: '＋', color: '#1f9d63' };
-const txCat = t => t?.type === 'income' ? incomeCat(t.category) : t?.type === 'savings' ? { name:'Savings Jar', icon:'🪙', color:'#d49b2a' } : cat(t?.category);
+const txCat = t => t?.type === 'income' ? incomeCat(t.category) : t?.type === 'savings' ? { name:'Savings Jar', icon:'🪙', color:'#d49b2a' } : t?.type === 'transfer' ? { name:'Transfer', icon:'↔️', color:'#536fb8' } : cat(t?.category);
 const monthKey = off => { const d = D(TODAY); d.setDate(1); d.setMonth(d.getMonth() + off); return ds(d).slice(0, 7); };
 const monthName = k => D(k + '-01').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
 const monthOffsetForDate = date => {
@@ -266,7 +278,7 @@ async function reloadData() {
   INCOME_CATS = await DB.getMeta('incomeCategories', structuredClone(INCOME_CATS_DEFAULT));
   const legacy = TX.filter(t => !t.type);
   legacy.forEach(t => t.type = 'expense');
-  const missingFund = TX.filter(t => t.fund !== 'cash' && t.fund !== 'card');
+  const missingFund = TX.filter(t => t.type !== 'transfer' && !['cash','card','revolut'].includes(t.fund));
   missingFund.forEach(t => t.fund = fundFromPayment(t.payment));
   const changedLegacy = [...new Map([...legacy, ...missingFund].map(t => [t.id, t])).values()];
   if (changedLegacy.length) await Promise.all(changedLegacy.map(t => DB.put('transactions', t)));

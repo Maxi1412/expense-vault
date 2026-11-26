@@ -441,6 +441,9 @@ const txRow = t => {
     const dep = t.direction !== 'withdrawal';
     return `<button class="item" onclick="txDetail('${t.id}')">${txCatIco(t)}<div class="grow"><b>Savings Jar</b><div class="mut">${dep ? 'Cash → Jar' : 'Jar → Cash'} · ${fd(t.date)}</div></div><span class="amt savings-amt">${dep ? '→ ' : '← '}${eur(t.amount)}</span></button>`;
   }
+  if (t.type === 'transfer') {
+    return `<button class="item" onclick="txDetail('${t.id}')">${txCatIco(t)}<div class="grow"><b>Transfer</b><div class="mut">${esc(transferLabel(t))} · ${fd(t.date)}</div></div><span class="amt transfer-amt">${eur(t.amount)}</span></button>`;
+  }
   return `<button class="item" onclick="txDetail('${t.id}')">${txCatIco(t)}<div class="grow"><b>${esc(t.merchant)}</b><div class="mut">${t.type === 'income' ? 'Income · ' : ''}${esc(t.category)} · ${fundLabel(fundOf(t))} · ${fd(t.date)} ${t.receiptId ? '· 📎' : ''}</div></div><span class="amt ${t.type === 'income' ? 'income-amt' : ''}">${t.type === 'income' ? '+' : ''}${eur(t.amount)}</span></button>`;
 };
 
@@ -454,6 +457,9 @@ function detailList(title, list, opts = {}) {
     if (t.type === 'savings') {
       const dep = t.direction !== 'withdrawal';
       return dateHead + `<button class="detail-item" onclick="txDetail('${t.id}')">${txCatIco(t)}<div class="grow"><b>Savings Jar</b><div class="mut">${dep ? 'Cash → Jar' : 'Jar → Cash'}${t.time ? ' · ' + esc(t.time) : ''}</div></div><span class="amt savings-amt">${dep ? '→ ' : '← '}${eur(t.amount)}</span></button>`;
+    }
+    if (t.type === 'transfer') {
+      return dateHead + `<button class="detail-item" onclick="txDetail('${t.id}')">${txCatIco(t)}<div class="grow"><b>Transfer</b><div class="mut">${esc(transferLabel(t))}${t.time ? ' · ' + esc(t.time) : ''}</div></div><span class="amt transfer-amt">${eur(t.amount)}</span></button>`;
     }
     return dateHead + `<button class="detail-item" onclick="txDetail('${t.id}')">${txCatIco(t)}<div class="grow"><b>${esc(t.merchant)}</b><div class="mut">${esc(t.category)}${t.subcategory ? ' · ' + esc(t.subcategory) : ''}${t.time ? ' · ' + esc(t.time) : ''}${t.receiptId ? ' · 📎' : ''}</div></div><span class="amt ${t.type === 'income' ? 'income-amt' : ''}">${t.type === 'income' ? '+' : ''}${eur(t.amount)}</span></button>`;
   }).join('');
@@ -565,7 +571,7 @@ function filtered() {
     if (f.pay && t.payment !== f.pay) return false;
     if (f.min !== '' && t.amount < +f.min) return false;
     if (f.max !== '' && t.amount > +f.max) return false;
-    return !q || `${t.merchant} ${t.category} ${t.subcategory || ''} ${t.notes || ''} ${t.payment} ${fundLabel(fundOf(t))}`.toLowerCase().includes(q);
+    return !q || `${t.merchant} ${t.category} ${t.subcategory || ''} ${t.notes || ''} ${t.payment} ${t.type==='transfer'?transferLabel(t):fundLabel(fundOf(t))}`.toLowerCase().includes(q);
   });
   const so = { new: (a, b) => b.date.localeCompare(a.date) || b.modified.localeCompare(a.modified), old: (a, b) => a.date.localeCompare(b.date), high: (a, b) => b.amount - a.amount, low: (a, b) => a.amount - b.amount };
   return l.sort(so[f.sort]);
@@ -585,7 +591,7 @@ function clearF() { S.f = { type: '', cat: '', pay: '', min: '', max: '', sort: 
 function customSheet() { sheet(`<h2>Custom dates</h2><label for="cf">From</label><input type="date" id="cf" value="${S.from || TODAY.slice(0, 8) + '01'}"><label for="ct">To</label><input type="date" id="ct" value="${S.to || TODAY}"><button class="btn" style="margin-top:16px" onclick="S.from=$('#cf').value;S.to=$('#ct').value;closeSheet();render()">Apply</button>`); }
 function filterSheet() {
   const f = S.f, o = (a, v) => a.map(x => `<option value="${esc(x)}" ${x === v ? 'selected' : ''}>${esc(x)}</option>`).join('');
-  sheet(`<h2>Filters</h2><label for="ftype">Type</label><select id="ftype"><option value="">All</option><option value="expense" ${f.type==='expense'?'selected':''}>Expenses</option><option value="income" ${f.type==='income'?'selected':''}>Income</option><option value="savings" ${f.type==='savings'?'selected':''}>Savings Jar</option></select><label for="fc">Category</label><select id="fc"><option value="">All</option>${o([...CATS.map(c => c.name), ...INCOME_CATS.map(c => c.name)], f.cat)}</select>
+  sheet(`<h2>Filters</h2><label for="ftype">Type</label><select id="ftype"><option value="">All</option><option value="expense" ${f.type==='expense'?'selected':''}>Expenses</option><option value="income" ${f.type==='income'?'selected':''}>Income</option><option value="transfer" ${f.type==='transfer'?'selected':''}>Transfers</option><option value="savings" ${f.type==='savings'?'selected':''}>Savings Jar</option></select><label for="fc">Category</label><select id="fc"><option value="">All</option>${o([...CATS.map(c => c.name), ...INCOME_CATS.map(c => c.name)], f.cat)}</select>
   <label for="fp">Payment method</label><select id="fp"><option value="">All</option>${o(PAYMENTS, f.pay)}</select>
   <div class="grid2"><div><label for="fmin">Min amount</label><input id="fmin" type="number" inputmode="decimal" value="${f.min}"></div><div><label for="fmax">Max amount</label><input id="fmax" type="number" inputmode="decimal" value="${f.max}"></div></div>
   <label for="fs">Sort by</label><select id="fs">${[['new', 'Newest first'], ['old', 'Oldest first'], ['high', 'Highest amount'], ['low', 'Lowest amount']].map(([k, n]) => `<option value="${k}" ${f.sort === k ? 'selected' : ''}>${n}</option>`).join('')}</select>
@@ -594,6 +600,7 @@ function filterSheet() {
 function txDetail(id) {
   const t = store.get(id); if (!t) return;
   if (t.type === 'savings') return savingsDetail(t);
+  if (t.type === 'transfer') return transferDetail(t);
   const url = receiptUrl(t.receiptId), isIncome = t.type === 'income';
   sheet(`<div class="row">${txCatIco(t)}<div class="grow"><h2 style="margin:0">${esc(t.merchant)}</h2><span class="mut">${isIncome ? 'Income · ' : ''}${esc(t.category)}${t.subcategory ? ' · ' + esc(t.subcategory) : ''}</span></div></div><div class="big ${isIncome ? 'income-amt' : ''}" style="margin:12px 0">${isIncome ? '+' : ''}${eur(t.amount)}</div>
   <div class="card">${[['Type', isIncome ? 'Income' : 'Expense'], ['Date', fdl(t.date) + ' · ' + (t.time || '')], [isIncome ? 'Received via' : 'Payment', t.payment], ['Money location', fundLabel(fundOf(t))], ...(isIncome ? [] : (Number(t.receiptTotal || t.amount) !== Number(t.amount) ? [['Receipt total', eur(t.receiptTotal || t.amount)], ['Your share', eur(t.amount)]] : [])), ...(isIncome || !(Number(t.taxTotal || 0) > 0) ? [] : [['Receipt Tax / VAT', eur(t.taxTotal)], ...(Number(t.receiptTotal || t.amount) !== Number(t.amount) ? [['Your VAT share', eur(t.personalTax ?? (Number(t.taxTotal || 0) * Number(t.amount || 0) / Math.max(Number(t.receiptTotal || t.amount), 0.01)))]] : []), ['Tax rate', (t.taxRates || []).length ? t.taxRates.join(', ') + '%' : '—']]), ['Notes', t.notes || '—'], ['Created', fd(t.created.slice(0, 10))], ['Last edited', fd(t.modified.slice(0, 10))]].map(([a, b]) => `<div class="row sp detail-row"><span class="mut">${a}</span><span>${esc(b)}</span></div>`).join('')}</div>
@@ -602,7 +609,7 @@ function txDetail(id) {
 }
 function confirmDel(id) {
   const t = store.get(id); if (!t) return;
-  sheet(`<h2>Delete this ${t.type==='savings'?'Savings Jar entry':'transaction'}?</h2><div class="card"><b>${esc(t.merchant)}</b><div>${eur(t.amount)}</div><div class="mut">${fdl(t.date)}</div></div><div class="btns"><button class="btn ghost" onclick="closeSheet()">Cancel</button><button class="btn del" onclick="deleteTx('${id}')">Delete</button></div>`);
+  sheet(`<h2>Delete this ${t.type==='savings'?'Savings Jar entry':t.type==='transfer'?'transfer':'transaction'}?</h2><div class="card"><b>${esc(t.merchant)}</b><div>${eur(t.amount)}</div><div class="mut">${fdl(t.date)}</div></div><div class="btns"><button class="btn ghost" onclick="closeSheet()">Cancel</button><button class="btn del" onclick="deleteTx('${id}')">Delete</button></div>`);
 }
 async function deleteTx(id) { await store.remove(id); closeSheet(); render(); }
 function rcpView(id) {
